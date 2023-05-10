@@ -717,7 +717,3 @@ def build_index_for_database(sql_db):
         json.dump(index_multiplier, f, indent=4)
 
 
-
-# sql_db = SqlDB('/home/huayu_ssh/PycharmProjects/dres_r/db/scotland_20200910')
-#
-# sql_db.build_trees()
