@@ -2,6 +2,7 @@ from zipfile import ZipFile
 import csv
 import io
 import pandas as pd
+import geopandas as gpd
 import json
 import os
 import tqdm
@@ -44,6 +45,8 @@ class SqlDBManager:
             os.makedirs(new_db_path, exist_ok=True)
             print('New db created at: %s' % new_db_path)
             os.mkdir(os.path.join(new_db_path, 'raw'))
+            os.mkdir(os.path.join(new_db_path, 'sql'))
+            os.mkdir(os.path.join(new_db_path, 'db_config'))
 
     def create_project_db(self, db_name):
         new_db_path = os.path.join(self.project_db_path, db_name)
@@ -54,6 +57,23 @@ class SqlDBManager:
             os.makedirs(new_db_path, exist_ok=True)
             print('New db created at: %s' % new_db_path)
             os.mkdir(os.path.join(new_db_path, 'raw'))
+            os.mkdir(os.path.join(new_db_path, 'sql'))
+            os.mkdir(os.path.join(new_db_path, 'db_config'))
+
+    def get_db_path(self, db_name, project_level=False):
+        if not project_level:
+            if db_name in self.list_global_db():
+                return os.path.join(self.global_db_path, db_name)
+            else:
+                warn('DB: %s does not exist!' % db_name)
+        else:
+            if self.project_name is None:
+                warn('Project not specified')
+            else:
+                if db_name in self.list_project_db():
+                    return os.path.join(self.project_db_path, db_name)
+                else:
+                    warn('DB: %s does not exist!' % db_name)
 
 
 class SqlDB:
@@ -145,14 +165,67 @@ class SqlDB:
         conn.commit()
         conn.close()
 
+    def get_db_config(self):
+
+        sql_config_path = [os.path.join(self.sub_paths['db_config'], file)
+                           for file in os.listdir(self.sub_paths['db_config']) if '.json' in file]
+
+        if len(sql_config_path):
+
+            sql_config_file = sql_config_path[0]
+
+            with open(sql_config_file, 'r') as f:
+                sql_config = json.load(f)
+
+        else:
+
+            sql_config = {
+                "RECORD_IDENTIFIER": "INTEGER",
+                "CHANGE_TYPE": "TEXT",
+                "PRO_ORDER": "TEXT",
+                "UPRN": "TEXT",
+                "UDPRN": "TEXT",
+                "ORGANISATION_NAME": "TEXT",
+                "DEPARTMENT_NAME": "TEXT",
+                "SUB_BUILDING_NAME": "TEXT",
+                "BUILDING_NAME": "TEXT",
+                "BUILDING_NUMBER": "TEXT",
+                "DEPENDENT_THOROUGHFARE": "TEXT",
+                "THOROUGHFARE": "TEXT",
+                "DOUBLE_DEPENDENT_LOCALITY": "TEXT",
+                "DEPENDENT_LOCALITY": "TEXT",
+                "POST_TOWN": "TEXT",
+                "POSTCODE": "TEXT",
+                "POSTCODE_TYPE": "TEXT",
+                "DELIVERY_POINT_SUFFIX": "TEXT",
+                "WELSH_DEPENDENT_THOROUGHFARE": "TEXT",
+                "WELSH_THOROUGHFARE": "TEXT",
+                "WELSH_DOUBLE_DEPENDENT_LOCALITY": "TEXT",
+                "WELSH_DEPENDENT_LOCALITY": "TEXT",
+                "WELSH_POST_TOWN": "TEXT",
+                "PO_BOX_NUMBER": "TEXT",
+                "PROCESS_DATE": "TEXT",
+                "START_DATE": "TEXT",
+                "END_DATE": "TEXT",
+                "LAST_UPDATE_DATE": "TEXT",
+                "ENTRY_DATE": "TEXT"
+            }
+
+            sql_config_file = os.path.join(self.sub_paths['db_config'], 'db_config.json')
+
+            with open(sql_config_file, 'w') as f:
+                json.dump(sql_config, f, indent=4)
+
+            print('db_config created')
+        return sql_config
+
     def build_raw(self, if_exist='skip'):
         db_status = self.db_status
 
         print(db_status)
 
         if not db_status['raw_added']:
-            print('Add raw database files to [db_path]/raw first and then run build')
-            return
+            raise FileNotFoundError('Add raw database files to [db_path]/raw first and then run build')
 
         if if_exist == 'skip':
 
@@ -197,7 +270,7 @@ class SqlDB:
         compile_global_uniques(self)
 
         path_thoroughfare_patterns = os.path.join(os.getcwd(), 'src', 'parser', 'thoroughfare_patterns.json')
-        os.system('cp %s %s' % (path_thoroughfare_patterns, sql_db.sub_paths['thoroughfare_patterns']))
+        os.system('cp %s %s' % (path_thoroughfare_patterns, self.sub_paths['thoroughfare_patterns']))
 
     def build_indices(self):
 
@@ -212,6 +285,13 @@ class SqlDB:
         self.build_trees()
         self.build_vocabulary()
         self.build_indices()
+
+    def reset_database(self):
+        print('Deleting SQL')
+        os.system('rm %s' % self.sub_paths['sql_db'])
+
+        print('Deleting Trees')
+        os.system('rm -rf %s/*' % self.sub_paths['tree'])
 
     def get_conn(self):
         return sqlite3.connect(self.sub_paths['sql_db'], timeout=10)
@@ -299,51 +379,108 @@ class SqlDB:
         con.close()
 
 
+def numeric_to_object(x):
+
+    if pd.isna(x):
+        return ''
+
+    elif isinstance(x, int):
+        return str(x)
+
+    elif isinstance(x, float):
+        return str(int(x))
+
+    else:
+        return x
+
+
+def convert_df_to_object(df):
+
+    for col in df:
+
+        if pd.api.types.is_object_dtype(df[col]):
+            df.loc[:, col] = df[col].fillna('')
+
+        elif pd.api.types.is_numeric_dtype(df[col]):
+            df.loc[:, col] =  df[col].apply(lambda x: numeric_to_object(x))
+
+        else:
+            df.loc[:, col] =  df[col]
+
+    return df
+
+
 def _parsing_func(sql_db):
 
     zip_path = [os.path.join(sql_db.sub_paths['raw'], file)
                 for file in os.listdir(sql_db.sub_paths['raw']) if '.zip' in file][0]
-    sql_config_path = [os.path.join(sql_db.sub_paths['db_config'], file)
-                       for file in os.listdir(sql_db.sub_paths['db_config']) if '.json' in file][0]
-
-    with open(sql_config_path, 'r') as f:
-        sql_config = json.load(f)
-
-    data_index = '28'
 
     db_file = sql_db.sub_paths['sql_db']
 
-    chunk_size = int(1e5)
-    rows = []
     conn = sqlite3.connect(db_file)
 
     with ZipFile(zip_path, 'r') as z:
         # Get file names of the big zip file
-        zz_files = [zz_file for zz_file in z.namelist() if '.zip' in zz_file]
+        zz_files = [zz_file for zz_file in z.namelist()]
 
-        for zz_file in tqdm.tqdm(zz_files):  # Load data of all sub zips and get the csv file
-            zz_data = io.BytesIO(z.read(zz_file))
+        if any('.gpkg' in zz_file for zz_file in zz_files):
 
-            with ZipFile(zz_data, 'r') as zz:
-                csv_files = [csv_file for csv_file in zz.namelist() if '.csv' in csv_file]
+            print('.gpkg database found. Starting to read db file')
 
-                for csv_file in csv_files:
+            zz_data = io.BytesIO(z.read(zz_files[0]))
 
-                    with zz.open(csv_file, 'r') as f:
+            gpkg_db = gpd.read_file(zz_data, layer='delivery_point_address')
 
-                        lines = [line.decode() for line in f.readlines()]
+            print('convert to object type')
 
-                        reader = csv.reader(lines)
+            gpkg_db = convert_df_to_object(gpkg_db)
 
-                        for row in reader:
-                            if row[0] == data_index:
-                                rows.append(row)
+            cols_upper = [col.upper() for col in gpkg_db.columns]
 
-                while len(rows) > chunk_size:
+            gpkg_db.columns = cols_upper
 
-                    df = pd.DataFrame.from_records(rows, columns=list(sql_config.keys()))
-                    df.to_sql(name='raw', con=conn, if_exists='append', dtype=sql_config, index=False)
-                    rows = rows[chunk_size:]
+            print('Save to SQL database')
+
+            gpkg_db.to_sql(name='raw', con=conn, if_exists='replace', dtype='TEXT', index=False)
+
+            print('Raw table building finished')
+
+        elif any('.zip' in zz_file for zz_file in zz_files):
+            print('.zip database found. Starting to read db file')
+
+            chunk_size = int(1e5)
+            rows = []
+            data_index = '28'
+
+            sql_config = sql_db.get_db_config()
+
+            zz_files = [zz_file for zz_file in z.namelist() if '.zip' in zz_file]
+
+            for zz_file in tqdm.tqdm(zz_files):  # Load data of all sub zips and get the csv file
+                zz_data = io.BytesIO(z.read(zz_file))
+
+                with ZipFile(zz_data, 'r') as zz:
+                    csv_files = [csv_file for csv_file in zz.namelist() if '.csv' in csv_file]
+
+                    for csv_file in csv_files:
+
+                        with zz.open(csv_file, 'r') as f:
+
+                            lines = [line.decode() for line in f.readlines()]
+
+                            reader = csv.reader(lines)
+
+                            for row in reader:
+                                if row[0] == data_index:
+                                    rows.append(row)
+
+                    while len(rows) > chunk_size:
+                        df = pd.DataFrame.from_records(rows, columns=list(sql_config.keys()))
+                        df.to_sql(name='raw', con=conn, if_exists='append', dtype=sql_config, index=False)
+                        rows = rows[chunk_size:]
+
+        else:
+            pass
 
     conn.close()
 
@@ -354,11 +491,7 @@ def _ex_func(sql_db):
 
     tasks_gen = sql_db.sql_table_batch_by_column('raw', 'POSTCODE', int(1e5))
 
-    sql_config_path = [os.path.join(sql_db.sub_paths['db_config'], file)
-                       for file in os.listdir(sql_db.sub_paths['db_config']) if '.json' in file][0]
-
-    with open(sql_config_path, 'r') as f:
-        sql_config = json.load(f)
+    sql_config = sql_db.get_db_config()
 
     sql_ex_config = sql_config.copy()
 
@@ -717,3 +850,7 @@ def build_index_for_database(sql_db):
         json.dump(index_multiplier, f, indent=4)
 
 
+
+# sql_db = SqlDB('/home/huayu_ssh/PycharmProjects/dres_r/db/scotland_20200910')
+#
+# sql_db.build_trees()
