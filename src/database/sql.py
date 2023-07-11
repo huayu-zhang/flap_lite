@@ -474,11 +474,15 @@ def _parsing_func(sql_db):
                                 if row[0] == data_index:
                                     rows.append(row)
 
-                    while len(rows) > chunk_size:
-                        df = pd.DataFrame.from_records(rows, columns=list(sql_config.keys()))
-                        df.to_sql(name='raw', con=conn, if_exists='append', dtype=sql_config, index=False)
-                        rows = rows[chunk_size:]
+                        while len(rows) > chunk_size:
+                            df = pd.DataFrame.from_records(rows, columns=list(sql_config.keys()))
+                            df.to_sql(name='raw', con=conn, if_exists='append', dtype=sql_config, index=False)
+                            rows = rows[chunk_size:]
 
+            df = pd.DataFrame.from_records(rows, columns=list(sql_config.keys()))
+            df.to_sql(name='raw', con=conn, if_exists='append', dtype=sql_config, index=False)
+            print('Raw table building finished')
+            
         else:
             pass
 
