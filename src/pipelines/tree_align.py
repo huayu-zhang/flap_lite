@@ -25,7 +25,6 @@ from src.preprocessing import postcode_preproc, address_line_preproc
 from src.pipelines.nw_alignment import align_and_score
 from src.alignment import SequentialAlignmentResults
 from src.utils import repl_positions
-from src.parser.multiplier_indexing import parse_multiplier
 
 
 class RuleMatchByTree:
@@ -364,6 +363,18 @@ def run(input_path, output_path, subset=None, parallel=True):
         except ModuleNotFoundError:
             for args in task_generator:
                 _run_task(args)
+
+
+def parse_multiplier(s):
+
+    match = re.search(r'(\d)[FKLPS](\d)', s)
+
+    if match is not None:
+
+        return int(match.group(1)), int(match.group(2))
+
+    else:
+        return None
 
 #
 # sql_db = SqlDB('/home/huayu_ssh/PycharmProjects/dres_r/db/scotland_20200910')

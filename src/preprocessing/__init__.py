@@ -1,8 +1,6 @@
 import re
 import warnings
 
-from src.parser import rule_parsing, parsing_to_string
-
 from src.utils import repl_positions
 
 
