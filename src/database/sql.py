@@ -9,13 +9,8 @@ import tqdm
 import sqlite3
 import re
 import itertools
-import pickle
 
-from tqdm.contrib.concurrent import process_map
-from src.database_compile.db_expansion import expand_uprn
-from warnings import warn
-
-from src.tree import Tree
+from src.utils import flatten
 
 
 class SqlDBManager:
@@ -28,12 +23,10 @@ class SqlDBManager:
 
     def list_global_db(self):
         db_names = os.listdir(self.global_db_path)
-        print(db_names)
         return db_names
 
     def list_project_db(self):
         db_names = os.listdir(self.project_db_path)
-        print(db_names)
         return db_names
 
     def create_global_db(self, db_name):
@@ -75,6 +68,9 @@ class SqlDBManager:
                 else:
                     warn('DB: %s does not exist!' % db_name)
 
+    def get_db(self, db_name, project_level=False):
+
+        return SqlDB(self.get_db_path(db_name, project_level))
 
 class SqlDB:
 
@@ -86,14 +82,11 @@ class SqlDB:
             'db_config': os.path.join(self.db_path, 'db_config'),
             'sql_db': os.path.join(self.db_path, 'sql', 'db.sqlite3'),
             'sql_db_temp': os.path.join(self.db_path, 'sql', 'db_temp.sqlite3'),
-            'tree': os.path.join(self.db_path, 'tree'),
-            'index': os.path.join(self.db_path, 'index'),
-            'index_database_local': os.path.join(self.db_path, 'index', 'index_database_local.json'),
-            'index_multiplier': os.path.join(self.db_path, 'index', 'index_multiplier.json'),
             'vocabulary': os.path.join(self.db_path, 'vocabulary'),
             'pc1_mappings': os.path.join(self.db_path, 'vocabulary', 'pc1_mappings.json'),
             'pc1_mappings_region': os.path.join(self.db_path, 'vocabulary', 'pc1_mappings_region.json'),
-            'unique_DOUBLE_DEPENDENT_LOCALITY': os.path.join(self.db_path, 'vocabulary', 'unique_DOUBLE_DEPENDENT_LOCALITY.json'),
+            'unique_DOUBLE_DEPENDENT_LOCALITY': os.path.join(self.db_path, 'vocabulary',
+                                                             'unique_DOUBLE_DEPENDENT_LOCALITY.json'),
             'unique_DEPENDENT_LOCALITY': os.path.join(self.db_path, 'vocabulary', 'unique_DEPENDENT_LOCALITY.json'),
             'unique_POST_TOWN': os.path.join(self.db_path, 'vocabulary', 'unique_POST_TOWN.json'),
             'thoroughfare_patterns': os.path.join(self.db_path, 'vocabulary', 'thoroughfare_patterns.json')
@@ -125,7 +118,7 @@ class SqlDB:
 
     def get_columns_of_table(self, table_name):
 
-        table_name = (table_name, )
+        table_name = (table_name,)
 
         conn = self.get_conn()
         cur = conn.cursor()
@@ -152,7 +145,8 @@ class SqlDB:
         tables = self.get_table_names()
 
         db_status['table_raw_built'] = 'raw' in tables
-        db_status['table_ex_built'] = 'ex' in tables
+        db_status['table_indexed_built'] = 'indexed' in tables
+        
 
         self.__db_status = db_status
 
@@ -239,26 +233,22 @@ class SqlDB:
             self.drop_table('raw')
             _parsing_func(self)
 
-    def build_ex(self, if_exist='skip'):
+    def indexing_db(self, if_exist='skip'):
         db_status = self.db_status
 
         if if_exist == 'skip':
 
-            if db_status['table_ex_built']:
-                print('TABLE ex exists, build skipped. Use if_exist="replace", if you want to create a new db')
+            if db_status['table_indexed_built']:
+                print('TABLE indexed exists, build skipped. Use if_exist="replace", if you want to create a new db')
             else:
-                _ex_func(self)
+                _indexing_database(self)
                 self.delete_temp()
 
         elif if_exist == 'replace':
 
-            self.drop_table('ex')
-            _ex_func(self)
+            self.drop_table('indexed')
+            _indexing_database(self)
             self.delete_temp()
-
-    def build_trees(self):
-        compile_postcode_trees(self)
-        compile_pt_tho_trees(self)
 
     def build_vocabulary(self):
 
@@ -272,26 +262,10 @@ class SqlDB:
         path_thoroughfare_patterns = os.path.join(os.getcwd(), 'src', 'parser', 'thoroughfare_patterns.json')
         os.system('cp %s %s' % (path_thoroughfare_patterns, self.sub_paths['thoroughfare_patterns']))
 
-    def build_indices(self):
-
-        if not os.path.exists(self.sub_paths['index']):
-            os.mkdir(self.sub_paths['index'])
-
-        build_index_for_database(self)
-
-    def setup_database(self):
-        self.build_raw()
-        self.build_ex()
-        self.build_trees()
+    def setup_database(self, if_exist='skip'):
+        self.build_raw(if_exist=if_exist)
         self.build_vocabulary()
-        self.build_indices()
-
-    def reset_database(self):
-        print('Deleting SQL')
-        os.system('rm %s' % self.sub_paths['sql_db'])
-
-        print('Deleting Trees')
-        os.system('rm -rf %s/*' % self.sub_paths['tree'])
+        self.indexing_db(if_exist=if_exist)
 
     def get_conn(self):
         return sqlite3.connect(self.sub_paths['sql_db'], timeout=10)
@@ -378,40 +352,22 @@ class SqlDB:
 
         con.close()
 
+    def create_index(self, table_name, columns):
 
-def numeric_to_object(x):
+        index_name = '__'.join(columns)
 
-    if pd.isna(x):
-        return ''
+        sql = "CREATE INDEX IF NOT EXISTS %s ON %s(%s)" % (
+            index_name,
+            table_name,
+            ', '.join(columns)
+        )
 
-    elif isinstance(x, int):
-        return str(x)
-
-    elif isinstance(x, float):
-        return str(int(x))
-
-    else:
-        return x
-
-
-def convert_df_to_object(df):
-
-    for col in df:
-
-        if pd.api.types.is_object_dtype(df[col]):
-            df.loc[:, col] = df[col].fillna('')
-
-        elif pd.api.types.is_numeric_dtype(df[col]):
-            df.loc[:, col] =  df[col].apply(lambda x: numeric_to_object(x))
-
-        else:
-            df.loc[:, col] =  df[col]
-
-    return df
+        with self.get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(sql)
 
 
 def _parsing_func(sql_db):
-
     zip_path = [os.path.join(sql_db.sub_paths['raw'], file)
                 for file in os.listdir(sql_db.sub_paths['raw']) if '.zip' in file][0]
 
@@ -420,7 +376,7 @@ def _parsing_func(sql_db):
     conn = sqlite3.connect(db_file)
 
     with ZipFile(zip_path, 'r') as z:
-        # Get file names of the big zip file
+        
         zz_files = [zz_file for zz_file in z.namelist()]
 
         if any('.gpkg' in zz_file for zz_file in zz_files):
@@ -456,7 +412,7 @@ def _parsing_func(sql_db):
 
             zz_files = [zz_file for zz_file in z.namelist() if '.zip' in zz_file]
 
-            for zz_file in tqdm.tqdm(zz_files):  # Load data of all sub zips and get the csv file
+            for zz_file in tqdm.tqdm(zz_files):  
                 zz_data = io.BytesIO(z.read(zz_file))
 
                 with ZipFile(zz_data, 'r') as zz:
@@ -482,220 +438,14 @@ def _parsing_func(sql_db):
             df = pd.DataFrame.from_records(rows, columns=list(sql_config.keys()))
             df.to_sql(name='raw', con=conn, if_exists='append', dtype=sql_config, index=False)
             print('Raw table building finished')
-            
+
         else:
             pass
 
     conn.close()
 
 
-def _ex_func(sql_db):
-
-    conn_temp = sql_db.get_conn_temp()
-
-    tasks_gen = sql_db.sql_table_batch_by_column('raw', 'POSTCODE', int(1e5))
-
-    sql_config = sql_db.get_db_config()
-
-    sql_ex_config = sql_config.copy()
-
-    sql_ex_config.update({
-        "ex_label": "TEXT",
-        "ex_uprn": "TEXT"}
-    )
-
-    for res in tqdm.tqdm(tasks_gen):
-        res_ex = expand_uprn(res)
-        res_ex.to_sql(name='ex',
-                      con=conn_temp,
-                      if_exists='append',
-                      dtype=sql_ex_config,
-                      index=False)
-
-    sql_chunk_gen = pd.read_sql(sql='SELECT * FROM ex', con=conn_temp, chunksize=int(1e5))
-
-    conn = sql_db.get_conn()
-
-    for chunk in tqdm.tqdm(sql_chunk_gen):
-        chunk.to_sql(name='ex',
-                     con=conn,
-                     if_exists='append',
-                     dtype=sql_ex_config,
-                     index=False
-                     )
-
-    conn.close()
-    conn_temp.close()
-
-
-seq_levels = {
-    'pc': [
-            'POST_TOWN', 'THOROUGHFARE',
-            'DEPENDENT_LOCALITY', 'DOUBLE_DEPENDENT_LOCALITY',
-             'DEPENDENT_THOROUGHFARE',
-            'BUILDING_NAME', 'BUILDING_NUMBER', 'SUB_BUILDING_NAME',
-            'DEPARTMENT_NAME', 'ORGANISATION_NAME'
-            ],
-
-
-    'pt_tho': [
-            'POSTCODE',
-            'DEPENDENT_LOCALITY', 'DOUBLE_DEPENDENT_LOCALITY',
-            'DEPENDENT_THOROUGHFARE',
-            'BUILDING_NAME', 'BUILDING_NUMBER', 'SUB_BUILDING_NAME',
-            'DEPARTMENT_NAME', 'ORGANISATION_NAME'
-            ]
-        }
-
-
-def add_and_return_children(args):
-
-    level, node = args
-
-    children = [Tree(name, None, {'level': level, 'Dataframe': group})
-                for name, group in node.metadata['Dataframe'].groupby(level)]
-    node.add_children(children)
-    node.metadata['Dataframe'] = None
-
-    return children
-
-
-def df_to_tree(df, seq_levels, verbose=True):
-
-    tree = Tree('root', None, {'level': 'root', 'Dataframe': df})
-    current_nodes = [tree]
-
-    for level in seq_levels:
-
-        if verbose:
-            next_nodes = list(
-                itertools.chain(
-                    *progress_map(add_and_return_children,
-                                  list(map(lambda node: (level, node), current_nodes)))
-                )
-            )
-        else:
-            next_nodes = list(
-                itertools.chain(
-                    *map(add_and_return_children,
-                         list(map(lambda node: (level, node), current_nodes)))
-                )
-            )
-        current_nodes = next_nodes
-
-    for node in current_nodes:
-        if len(node.metadata['Dataframe']) > 1:
-
-            warn('Potential duplicated records from expansion: \n %s'
-                          % str(node.metadata['Dataframe'].to_dict('records')))
-
-            original = ['-' not in str(index) for index in node.metadata['Dataframe'].index]
-
-            if sum(original):
-                node.metadata['Dataframe'] = node.metadata['Dataframe'][original]
-            else:
-                node.metadata['Dataframe'] = node.metadata['Dataframe'].iloc[0, :]
-
-    return tree
-
-
-def _compile_postcode_subtree(args):
-
-    path, postcode, group = args
-
-    pc0, pc1 = postcode.split(' ')
-
-    file = os.path.join(path, '-'.join([pc0, pc1]))
-
-    if not os.path.exists(file):
-        sub_tree = df_to_tree(group, seq_levels['pc'], verbose=False)
-
-        sub_tree.name = postcode
-        sub_tree.metadata['level'] = 'POSTCODE'
-
-        with open(file, 'wb') as f:
-            pickle.dump(sub_tree, f)
-
-
-def compile_postcode_trees(sql_db, parallel=True):
-
-    df_batch = sql_db.sql_table_batch_by_column(table_name='ex', by_columns='POSTCODE', batch_size=int(1e5))
-
-    path = os.path.join(sql_db.sub_paths['tree'], 'pc_compiled')
-
-    if not os.path.exists(path):
-        os.makedirs(path)
-
-    try:
-        while 1:
-            df = next(df_batch)
-
-            if parallel:
-                from tqdm.contrib.concurrent import process_map
-
-                process_map(_compile_postcode_subtree, ((path, name, group) for name, group in df.groupby('POSTCODE')),
-                            max_workers=os.cpu_count())
-            else:
-                for name, group in df.groupby('POSTCODE'):
-                    _compile_postcode_subtree((name, group))
-
-    except StopIteration:
-        pass
-
-    finally:
-        del df_batch
-
-
-def _compile_pt_tho_subtree(args):
-
-    path, (pt, tho), group = args
-
-    file = os.path.join(path, '-'.join([pt, tho]))
-
-    if not os.path.exists(file):
-        sub_tree = df_to_tree(group, seq_levels['pt_tho'], verbose=False)
-
-        sub_tree.name = tho
-        sub_tree.metadata['level'] = 'THOROUGHFARE'
-
-        parent_tree = Tree(pt, sub_tree, {'level': 'POST_TOWN'})
-
-        with open(file, 'wb') as f:
-            pickle.dump(parent_tree, f)
-
-
-def compile_pt_tho_trees(sql_db, parallel=True):
-
-    df_batch = sql_db.sql_table_batch_by_column(table_name='ex', by_columns=['POST_TOWN', 'THOROUGHFARE'],
-                                                batch_size=int(1e5))
-
-    path = os.path.join(sql_db.sub_paths['tree'], 'pt_tho_compiled')
-
-    if not os.path.exists(path):
-        os.makedirs(path)
-
-    try:
-        while 1:
-            df = next(df_batch)
-
-            if parallel:
-                from tqdm.contrib.concurrent import process_map
-
-                process_map(_compile_pt_tho_subtree, ((path, name, group) for name, group in df.groupby(['POST_TOWN', 'THOROUGHFARE'])),
-                            max_workers=os.cpu_count())
-            else:
-                for name, group in df.groupby(['POST_TOWN', 'THOROUGHFARE']):
-                    _compile_pt_tho_subtree((name, group))
-
-    except StopIteration:
-        pass
-
-    finally:
-        del df_batch
-
-
 def compile_pc1_uniques(sql_db):
-
     batch_gen = sql_db.sql_table_batch_by_column(
         table_name='ex', by_columns='POSTCODE', batch_size=int(1e5),
         match_func=lambda next_res, res: next_res[15].split(' ')[0] == res[-1][15].split(' ')[0])
@@ -730,8 +480,7 @@ def compile_pc1_uniques(sql_db):
 
 
 def compile_pc1_mappings_region(sql_db):
-
-    path_pc1_region_mappings = os.path.join(os.getcwd(), 'src', 'database', 'pc1_mappings_region.json')
+    path_pc1_region_mappings = os.path.join(os.getcwd(), 'src', 'parser', 'pc1_mappings_region.json')
     os.system('cp %s %s' % (path_pc1_region_mappings, sql_db.sub_paths['pc1_mappings_region']))
 
 
@@ -754,107 +503,136 @@ def compile_global_uniques(sql_db):
             json.dump(res, f, indent=4)
 
 
-def index_local_neighbourhood_database(batch):
+def _indexing_database(sql_db):
+    conn_temp = sql_db.get_conn_temp()
 
-    collections = []
+    tasks_gen = sql_db.sql_table_batch_by_column('raw', 'POSTCODE', int(1e5))
 
-    for (bnu, pc, ex_label), group in batch.groupby(['BUILDING_NUMBER', 'POSTCODE', 'ex_label']):
+    for res in tqdm.tqdm(tasks_gen):
+        res_indexed = indexing_uprn(res)
+        res_indexed.to_sql(name='indexed',
+                           con=conn_temp,
+                           if_exists='append',
+                           dtype='TEXT',
+                           index=False)
 
-        if 'syn' not in ex_label:
-            if len(bnu):
-                if len(group) > 1:
-                    collections.append({
-                        'index': '-'.join([bnu, pc]),
-                        'number_of_subs': len(group)
-                    })
-    return collections
+    sql_chunk_gen = pd.read_sql(sql='SELECT * FROM indexed', con=conn_temp, chunksize=int(1e5))
 
+    conn = sql_db.get_conn()
 
-def guess_multiplier(index, local_max, local_n_subs):
+    for chunk in tqdm.tqdm(sql_chunk_gen):
+        chunk.to_sql(name='indexed',
+                     con=conn,
+                     if_exists='append',
+                     dtype='TEXT',
+                     index=False
+                     )
 
-    if (index in local_max) and (index in local_n_subs):
-
-        max_level = local_max[index]['max_level']
-        max_flat = local_max[index]['max_flat']
-        n_sub = local_n_subs[index]
-
-        if max_flat > 1:
-
-            if max_level * max_flat == n_sub:
-                return {'multiplier': max_flat, 'confidence': 'exact'}
-
-            elif n_sub % max_flat == 0:
-                return {'multiplier': max_flat, 'confidence': 'high'}
-
-    elif index in local_n_subs:
-
-        n_sub = local_n_subs[index]
-
-        if (n_sub % 2 == 0) and (n_sub % 3 == 0):
-
-            return {'multiplier': 2, 'confidence': 'low'}
-
-        elif n_sub % 2 == 0:
-
-            return {'multiplier': 2, 'confidence': 'medium'}
-
-        elif n_sub % 3 == 0:
-
-            return {'multiplier': 3, 'confidence': 'medium'}
-
-    elif index in local_max:
-
-        max_flat = local_max[index]['max_flat']
-
-        if max_flat > 1:
-
-            return {'multiplier': max_flat, 'confidence': 'low'}
-
-    return {'multiplier': 2, 'confidence': 'none'}
+    conn.close()
+    conn_temp.close()
 
 
-def build_index_for_database(sql_db):
+def type_of_macro(row):
 
-    batch_gen = sql_db.sql_table_batch_by_column(table_name='ex', by_columns='POSTCODE', batch_size=int(1e5))
+    cols = ['DEPENDENT_THOROUGHFARE', 'THOROUGHFARE', 'DOUBLE_DEPENDENT_LOCALITY', 'DEPENDENT_LOCALITY']
 
-    list_local_index_database = process_map(index_local_neighbourhood_database, batch_gen)
-
-    list_local_index_database_flattened = list(itertools.chain(*list_local_index_database))
-
-    local_index_database = {d['index']: d['number_of_subs'] for d in list_local_index_database_flattened}
-
-    index_multiplier = {}
-
-    for k, v in local_index_database.items():
-
-        n_sub = v
-
-        if n_sub % 16 == 0:
-            index_multiplier[k] = {'multiplier': 2, 'confidence': 'medium'}
-
-        elif n_sub % 12 == 0:
-            index_multiplier[k] = {'multiplier': 3, 'confidence': 'low'}
-
-        elif (n_sub % 2 == 0) and (n_sub % 3 == 0):
-            index_multiplier[k] = {'multiplier': 2, 'confidence': 'low'}
-
-        elif n_sub % 2 == 0:
-            index_multiplier[k] = {'multiplier': 2, 'confidence': 'medium'}
-
-        elif n_sub % 3 == 0:
-            index_multiplier[k] = {'multiplier': 3, 'confidence': 'medium'}
-
-        else:
-            index_multiplier[k] = {'multiplier': 2, 'confidence': 'low'}
-
-    with open(sql_db.sub_paths['index_database_local'], 'w') as f:
-        json.dump(local_index_database, f, indent=4)
-
-    with open(sql_db.sub_paths['index_multiplier'], 'w') as f:
-        json.dump(index_multiplier, f, indent=4)
+    return ''.join([str(int(len(row[col]) > 0)) for col in cols])
 
 
+def type_of_micro(row):
 
-# sql_db = SqlDB('/home/huayu_ssh/PycharmProjects/dres_r/db/scotland_20200910')
+    cols = ['ORGANISATION_NAME', 'DEPARTMENT_NAME', 'SUB_BUILDING_NAME',
+            'BUILDING_NAME', 'BUILDING_NUMBER']
+
+    return ''.join([str(int(len(row[col]) > 0)) for col in cols])
+
+
+def parse_number_like_uprn(row):
+
+    p = re.compile(r"((\d[A-Z]\d+)|([A-Z]|PF|BF|GF)?(\d+)([A-Z])?|(?<!')(^|\b)([A-Z]|GROUND)(\b|$)(?!'))")
+
+    split_pattern = re.compile(r"(?<=\d)(?=\D)|(?=\d)(?<=\D)")
+
+    units = list()
+
+    for col in ['SUB_BUILDING_NAME', 'BUILDING_NAME']:
+        if len(row[col]):
+            matches = list(re.finditer(p, row[col]))
+            units.append(flatten([re.split(split_pattern, match.group(1))
+                          if re.search(r'\dF\d', match.group(1)) is None else [match.group(1)]
+                          for match in matches]))
+
+    if len(row['BUILDING_NUMBER']):
+        units.append([row['BUILDING_NUMBER']])
+
+    res = flatten(units[::-1])
+
+    if len(res) < 5:
+        res += [''] * (5 - len(res))
+    elif len(res) > 5:
+        res = res[:5]
+
+    return pd.Series(res)
+
+
+def split_postcode_uprn(row):
+
+    p = re.compile(r'([A-Z]{1,2})([0-9][A-Z0-9]?)(?: +)?([0-9])([A-Z])([A-Z])')
+
+    match = re.match(p, row['POSTCODE'])
+
+    pc0, pc1 = ''.join([match.group(i) for i in range(1, 3)]), ''.join([match.group(i) for i in range(3, 6)])
+
+    pc_area, pc_district, pc_sector, pc_unit_0, pc_unit_1 = [match.group(i) for i in range(1, 6)]
+
+    return pd.Series([pc0, pc1, pc_area, pc_district, pc_sector, pc_unit_0, pc_unit_1])
+
+
+def count_n_tenement(df):
+
+    df['n_tenement'] = 1
+
+    groups = []
+
+    for (i, j), group in df.groupby(['BUILDING_NAME', 'POSTCODE']):
+        if (i != '') and (len(group) > 1):
+            group['n_tenement'] = len(group)
+
+        groups.append(group)
+
+    df = pd.concat(groups)
+
+    groups = []
+
+    for (i, j), group in df.groupby(['BUILDING_NUMBER', 'POSTCODE']):
+        if (i != '') and (len(group) > 1):
+            group['n_tenement'] = len(group)
+        groups.append(group)
+
+    df = pd.concat(groups)
+
+    return df
+
+def indexing_uprn(df):
+
+    df = count_n_tenement(df)
+
+    df['type_of_micro'] = df.apply(type_of_micro, axis=1)
+    df['type_of_macro'] = df.apply(type_of_macro, axis=1)
+
+    df[['number_like_%s' % i for i in range(5)]] = df.apply(parse_number_like_uprn, axis=1)
+    df[['pc0', 'pc1', 'pc_area', 'pc_district', 'pc_sector', 'pc_unit_0', 'pc_unit_1']] = \
+        df.apply(split_postcode_uprn, axis=1)
+
+    return df
+
+
+# dm = SqlDBManager()
 #
-# sql_db.build_trees()
+# dm.list_global_db()
+#
+# sql_db = dm.get_db(db_name='the_database')
+#
+# sql_db.setup_database(if_exist='replace')
+#
+# sql_db.sql_query("select * from indexed")

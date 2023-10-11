@@ -3,6 +3,7 @@ Consider split in different files later
 
 """
 import pandas as pd
+import numpy as np
 
 
 # Span and token operations
@@ -14,11 +15,19 @@ class Span:
         assert self.start <= self.end, 'end < start is not allowed'
 
     def __contains__(self, item):
-        assert isinstance(item, type(self)), 'can only compare with another Span'
-        return (self.start <= item.start) and (self.end >= item.end)
+
+        if isinstance(item, type(self)):
+            return (self.start <= item.start) and (self.end > item.end)
+        elif isinstance(item, int) or isinstance(item, float) or isinstance(item, np.number):
+            return (self.start <= item) and (self.end > item)
+        else:
+            raise TypeError('Can only compare a number or a Span')
+
+    def __len__(self):
+        return self.end - self.start
 
     def __str__(self):
-        return 'Span: [%s, %s]' % (self.start, self.end)
+        return 'Span: [%s, %s)' % (self.start, self.end)
 
     def __repr__(self):
         return 'Span(%s, %s)' % (self.start, self.end)
@@ -124,11 +133,11 @@ def span_to_string(span, s):
 # UPRN formatting
 
 def join_uprn_fields(d_uprn):
-    for key in d_uprn:
-        if pd.isna(d_uprn[key]):
-            d_uprn[key] = ''
-        else:
-            d_uprn[key] = str(d_uprn[key])
+    # for key in d_uprn:
+    #     if pd.isna(d_uprn[key]):
+    #         d_uprn[key] = ''
+    #     else:
+    #         d_uprn[key] = str(d_uprn[key])
 
     return '\n'.join([
         ' | '.join([d_uprn['ORGANISATION_NAME'], d_uprn['DEPARTMENT_NAME'],

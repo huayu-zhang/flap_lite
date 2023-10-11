@@ -25,7 +25,7 @@ def postcode_preproc(string, suppress_warnings=False):
 
 def address_line_preproc(address):
     preproc_mapping = [
-        (r'[^\w\-/\s]', ' '),
+        (r"[^\w\-/\s'\.\(\)]", ' '),
         (r'  +', ' '),
         (r'--+', '-'),
         (r'//+', '/')

@@ -1,5 +1,6 @@
 import time
 import os
+from tqdm.contrib.concurrent import process_map
 
 
 def _test_func(x):
@@ -60,15 +61,20 @@ def _progress_map_tqdm(func, iterable):
     return map_result
 
 
-def progress_map_tqdm_concurrent(func, iterable, max_workers=None, chunksize=None):
+def progress_map_tqdm_concurrent(func, iterable, length=None, max_workers=None, chunksize=None):
 
     if max_workers is None:
         max_workers = os.cpu_count()
 
     if chunksize is None:
-        chunksize = calc_chunksize(max_workers, len(iterable))
+        if length is not None:
+            chunksize = calc_chunksize(max_workers, length)
+        else:
+            try:
+                chunksize = calc_chunksize(max_workers, len(iterable))
+            except TypeError:
+                chunksize = calc_chunksize(max_workers, 5000)
 
-    from tqdm.contrib.concurrent import process_map
     map_result = process_map(func, iterable, max_workers=max_workers,
                              chunksize=chunksize)
 
@@ -83,5 +89,3 @@ def progress_map(func, iterable):
         map_result = _progress_map_naive(func, iterable)
 
     return map_result
-
-

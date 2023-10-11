@@ -19,7 +19,22 @@ class LinearAssignmentAlignment:
 
     def __init__(self, seq1, seq2):
         self.seq1 = seq1
-        self.seq2 = seq2
+
+        self.seq2_index = {}
+
+        if isinstance(seq2, str):
+            self.seq2 = seq2
+        elif isinstance(seq2, dict):
+            tmp_start = 0
+            self.seq2 = ' '.join([v for v in seq2.values() if len(v)])
+
+            for k, v in seq2.items():
+
+                if len(v):
+                    self.seq2_index[k] = Span(tmp_start, tmp_start + len(v))
+                    tmp_start += len(v) + 1
+                else:
+                    self.seq2_index[k] = []
 
         self.cost_matrix = None
         self.assignment_mapping = None
@@ -140,20 +155,21 @@ class LinearAssignmentAlignment:
         if self.assignment_mapping is None:
             self._align()
 
-        return NonSequentialAlignmentResult(self.assignment_mapping, self.seq1, self.seq2)
+        return NonSequentialAlignmentResult(self.assignment_mapping, self.seq1, self.seq2, self.seq2_index)
 
 
 class NonSequentialAlignmentResult:
 
-    def __init__(self, mapping, seq1, seq2):
+    def __init__(self, mapping, seq1, seq2, seq2_index=None):
         self.mapping = mapping
         self.seq1 = seq1
         self.seq2 = seq2
+        self.seq2_index = seq2_index
 
         self.meta = dict(mapping=mapping,
                          n_aligned=len(mapping),
-                         len_x=len(seq1),
-                         len_y=len(seq2))
+                         ft_len_x=len(seq1),
+                         ft_len_y=len(seq2))
 
     def __str__(self):
         mapping = self.meta['mapping']
@@ -206,16 +222,40 @@ class NonSequentialAlignmentResult:
         else:
             n_insertion = 0
 
-        self.meta['n_insertion'] = n_insertion
+        self.meta['ft_n_insertion'] = n_insertion
+
+    def calculate_subscore(self):
+
+        seq2_index = self.seq2_index
+        mapping = self.mapping
+
+        seq2_backtrace = {k: [] for k in seq2_index}
+        seq2_perc = {}
+
+        for i, j in mapping:
+
+            for k, span in seq2_index.items():
+
+                if j in span:
+                    seq2_backtrace[k].append(i)
+                    break
+
+        for k in seq2_backtrace:
+            if len(seq2_backtrace[k]):
+                seq2_perc['ft_perc_%s' % k] = len(seq2_backtrace[k]) / len(seq2_index[k])
+            else:
+                seq2_perc['ft_perc_%s' % k] = 0
+
+        self.meta.update(seq2_perc)
 
     def calculate_score(self):
 
-        if 'n_insertion' not in self.meta:
+        if 'ft_n_insertion' not in self.meta:
             self.count_insertion()
 
         n_aligned = self.meta['n_aligned']
-        len_x = self.meta['len_x']
-        len_y = self.meta['len_y']
+        len_x = self.meta['ft_len_x']
+        len_y = self.meta['ft_len_y']
 
         try:
             perc_x = n_aligned/len_x
@@ -227,8 +267,86 @@ class NonSequentialAlignmentResult:
             perc_y = 0
             f1 = 0
 
-        self.meta['perc_x'] = perc_x
-        self.meta['perc_y'] = perc_y
-        self.meta['f1'] = f1
+        self.meta['ft_perc_x'] = perc_x
+        self.meta['ft_perc_y'] = perc_y
+        self.meta['ft_f1'] = f1
 
-        self.meta['score'] = self.meta['f1']
+        if self.seq2_index is not None:
+            self.calculate_subscore()
+
+        self.meta['score'] = self.meta['ft_f1']
+
+    def get_score(self):
+
+        self.calculate_score()
+        score = {k: self.meta[k] for k in self.meta if 'ft_' in k}
+
+        return score
+
+
+#
+# uprn = {'CHANGE_TYPE': 'I', 'UPRN': '10091986837', 'UDPRN': '8253456',
+#         'ORGANISATION_NAME': 'MANSFIELD CARE ADMINISTRATION', 'DEPARTMENT_NAME': '', 'SUB_BUILDING_NAME': '',
+#         'BUILDING_NAME': '', 'BUILDING_NUMBER': '99', 'DEPENDENT_THOROUGHFARE': '', 'THOROUGHFARE': 'CRAIGHALL ROAD',
+#         'DOUBLE_DEPENDENT_LOCALITY': '', 'DEPENDENT_LOCALITY': '', 'POST_TOWN': 'EDINBURGH', 'POSTCODE': 'EH6 4RD',
+#         'POSTCODE_TYPE': 'S', 'DELIVERY_POINT_SUFFIX': '1T', 'WELSH_DEPENDENT_THOROUGHFARE': '',
+#         'WELSH_THOROUGHFARE': '', 'WELSH_DOUBLE_DEPENDENT_LOCALITY': '', 'WELSH_DEPENDENT_LOCALITY': '',
+#         'WELSH_POST_TOWN': '', 'PO_BOX_NUMBER': '', 'PROCESS_DATE': '2018-11-06',
+#         'START_DATE': '2018-12-06', 'END_DATE': '', 'LAST_UPDATE_DATE': '2018-12-06',
+#         'ENTRY_DATE': '2012-03-19', 'GEOMETRY': None, 'n_tenement': '1', 'type_of_micro': '10001',
+#         'type_of_macro': '0100', 'number_like_0': '99', 'number_like_1': '', 'number_like_2': '', 'number_like_3': '',
+#         'number_like_4': '', 'pc0': 'EH6', 'pc1': '4RD', 'pc_area': 'EH', 'pc_district': '6', 'pc_sector': '4',
+#         'pc_unit_0': 'R', 'pc_unit_1': 'D'}
+
+#
+# from src.database.sql import SqlDB
+#
+#
+# sql_db = SqlDB('/home/huayu_ssh/PycharmProjects/dres_r/db/scotland_curl')
+#
+# columns = ['ORGANISATION_NAME', 'DEPARTMENT_NAME', 'SUB_BUILDING_NAME', 'BUILDING_NAME', 'BUILDING_NUMBER',
+# 'DEPENDENT_THOROUGHFARE', 'THOROUGHFARE', 'DOUBLE_DEPENDENT_LOCALITY', 'DEPENDENT_LOCALITY', 'POST_TOWN', 'POSTCODE']
+#
+#
+# res = sql_db.sql_query('select * from indexed limit 1')[0]
+#
+# d = {k: uprn[k] for k in columns}
+#
+# laa = LinearAssignmentAlignment(seq1='MANSFIELD CARE ADMINISTRATION 99 CRAIGHALL ROAD EDINBURGH EH6 4RD',
+#                                 seq2=d)
+#
+# ar = laa.get_result()
+
+
+#
+# laa.seq2
+# laa.seq2_index
+#
+#
+# ar = laa.get_result()
+#
+#
+# mapping = ar.mapping
+#
+# seq2 = ar.seq2
+# seq2_index = ar.seq2_index
+#
+# seq2_backtrace = {k: [] for k in seq2_index}
+# seq2_perc = {}
+#
+#
+# for i, j in mapping:
+#
+#     for k, span in seq2_index.items():
+#
+#         if j in span:
+#
+#             seq2_backtrace[k].append(i)
+#             break
+#
+# for k in seq2_backtrace:
+#     if len(seq2_backtrace[k]):
+#         seq2_perc[k] = len(seq2_backtrace[k])/len(seq2_index[k])
+#     else:
+#         seq2_perc[k] = 0
+#
