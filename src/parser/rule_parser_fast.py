@@ -256,7 +256,7 @@ class RuleParserFast:
 
 
 NUMBER_LIKE_MASTER_REGEX = re.compile(
-    r"(FLAT|UNIT|BUILDING|ROOM|BLOCK|BONDS?|FL|PF|BF|GF|APARTMENT|\(F|F|-|\()? ?"
+    r"(FLAT|UNIT|HOUSE|BUILDING|ROOM|BLOCK|BONDS?|FL|PF|BF|GF|APARTMENT|\(F|F|-|\()? ?"
     r"((\dF\d+)|(\d+[A-Z]\d+)|([A-EG-Z])?(\d+)([A-Z])?|(?<!')(^|\b)([A-Z]|GROUND)($|\b)(?!'))"
     r"\)?")
 
@@ -294,7 +294,7 @@ def fast_parsing(address):
 
     matches = list(re.finditer(p, address))
 
-    prefix = [match.group(1) is not None for match in matches]
+    prefix = [(match.group(1) is not None) or (re.search(r'\dF\d', match.group(2)) is not None) for match in matches]
 
     units = [re.split(split_pattern, match.group(2))
              if re.search(r'\dF\d', match.group(2)) is None else [match.group(2)]

@@ -166,16 +166,19 @@ class SqlMatcher:
 
     def match(self, address, max_beam_width=500, score_threshold=0.3, troubleshoot=False):
 
-#         self.t_temp = time.time()  # time
-#         self._record_time('start')  # time
+        #         self.t_temp = time.time()  # time
+        #         self._record_time('start')  # time
 
-        address, _ = address_line_preproc(address)
+        address, log = address_line_preproc(address)
 
-#         self._record_time('preproc')  # time
+        if not log['proceed']:
+            return {'score': 0}
+
+        #         self._record_time('preproc')  # time
 
         parsed = self.parser.parse(address, method='fast')
 
-#         self._record_time('fast_parse')  # time
+        #         self._record_time('fast_parse')  # time
 
         current_bw = 0
 
@@ -251,19 +254,28 @@ class SqlMatcher:
 
                 if self.multiplier_indices is not None:
 
-                    index = '--'.join(['-'.join(list_of_indices), parsed['FOR_QUERY']['POSTCODE']])
-
                     max_level = 0
                     max_flat = 0
 
-                    if index in self.multiplier_indices.index:
+                    try:
+                        index = '--'.join(['-'.join(list_of_indices), parsed['FOR_QUERY']['POSTCODE']])
 
-                        max_level = self.multiplier_indices.loc[index, 'max_level']
-                        max_flat = self.multiplier_indices.loc[index, 'max_flat']
+                        if index in self.multiplier_indices.index:
+                            max_level = self.multiplier_indices.loc[index, 'max_level']
+                            max_flat = self.multiplier_indices.loc[index, 'max_flat']
+
+                    except KeyError:
+
+                        pass
 
                     for i, row in res.iterrows():
 
-                        multiplier, _ = guess_multiplier(max_level, max_flat, row['n_tenement'])
+                        try:
+                            n_tenement = int(row['n_tenement'])
+                        except ValueError:
+                            n_tenement = 1
+
+                        multiplier, _ = guess_multiplier(max_level, max_flat, n_tenement)
                         alt_number = (level - 1) * multiplier + flat
                         alt_parsed['NUMBER_LIKE'][key] = str(alt_number)
 
@@ -289,17 +301,11 @@ class SqlMatcher:
             try:
                 if self.scorer is not None:
                     X = [res['features'] for res in results]
-#                     t0 = time.time() # time
+                    #                     t0 = time.time() # time
                     scores = self.scorer.score_batch(X)
-#                     self.t_log['scorer'] = time.time() - t0 # time
+                    #                     self.t_log['scorer'] = time.time() - t0 # time
                     for res, score in zip(results, scores):
                         res['score'] = score
-
-                # results = sorted(results, key=lambda x: x['score'], reverse=True)
-                # for res in results[:10]:
-                #     print(res['uprn_row'].to_dict())
-                #     print(res['features'])
-                #     print(res['score'])
 
                 best_res = max(results, key=lambda x: x['score'])
                 if best_res['score'] > score_threshold:
@@ -316,8 +322,11 @@ class SqlMatcher:
 
         # End the main loop
 
-#         self._record_time('main_loop')  # time
-#         self.t_log['beam_width'] = current_bw  # time
+        #         self._record_time('main_loop')  # time
+        #         self.t_log['beam_width'] = current_bw  # time
+
+        if best_res is None:
+            best_res = {'score': 0}
 
         if troubleshoot:
             return best_res, results
@@ -330,9 +339,9 @@ class SqlMatcher:
             return self.match(address, max_beam_width, score_threshold, troubleshoot)
         except:
             try:
-                return {'error': '\n'.join([address, traceback.format_exc()])}
+                return {'score': 0, 'error': '\n'.join([address, traceback.format_exc()])}
             except:
-                return {'error': traceback.format_exc()}
+                return {'score': 0, 'error': traceback.format_exc()}
 
     def match_batch(self, list_of_addresses, max_workers=None, chunksize=None):
 
@@ -403,7 +412,7 @@ def repl_func(match):
 
 
 NUMBER_LIKE_MASTER_REGEX = re.compile(
-    r"(FLAT|UNIT|BUILDING|ROOM|BLOCK|BONDS?|FL|APARTMENT|\(F|F|-|\()? ?"
+    r"(FLAT|UNIT|HOUSE|BUILDING|ROOM|BLOCK|BONDS?|FL|APARTMENT|\(F|F|-|\()? ?"
     r"((\d[A-Z]\d+)|(PF|BF|GF|[A-Z])?(\d+)([A-Z])?|(?<!')(^|\b)([A-Z]|GROUND)($|\b)(?!'))"
     r"\)?")
 

@@ -210,8 +210,12 @@ class NonSequentialAlignmentResult:
 
         mapping = self.meta['mapping']
 
-        mapping_ends = [[min(mapping, key=lambda x: x[0])[0], max(mapping, key=lambda x: x[0])[0]],
-                        [min(mapping, key=lambda x: x[1])[1], max(mapping, key=lambda x: x[1])[1]]]
+        try:
+            mapping_ends = [[min(mapping, key=lambda x: x[0])[0], max(mapping, key=lambda x: x[0])[0]],
+                            [min(mapping, key=lambda x: x[1])[1], max(mapping, key=lambda x: x[1])[1]]]
+        except ValueError:
+            self.meta['ft_n_insertion'] = 0
+            return
 
         if len(self.meta['mapping']):
             n_insertion = 0

@@ -447,7 +447,7 @@ def _parsing_func(sql_db):
 
 def compile_pc1_uniques(sql_db):
     batch_gen = sql_db.sql_table_batch_by_column(
-        table_name='ex', by_columns='POSTCODE', batch_size=int(1e5),
+        table_name='raw', by_columns='POSTCODE', batch_size=int(1e5),
         match_func=lambda next_res, res: next_res[15].split(' ')[0] == res[-1][15].split(' ')[0])
 
     columns_to_compile = ["THOROUGHFARE", "DOUBLE_DEPENDENT_LOCALITY", "DEPENDENT_LOCALITY", "POST_TOWN"]
@@ -547,9 +547,15 @@ def type_of_micro(row):
     return ''.join([str(int(len(row[col]) > 0)) for col in cols])
 
 
+NUMBER_LIKE_MASTER_REGEX = re.compile(
+    r"(FLAT|UNIT|BUILDING|ROOM|BLOCK|BONDS?|FL|PF|BF|GF|APARTMENT|\(F|F|-|\()? ?"
+    r"((\dF\d+)|(\d+[A-Z]\d+)|([A-EG-Z])?(\d+)([A-Z])?|(?<!')(^|\b)([A-Z]|GROUND)($|\b)(?!'))"
+    r"\)?")
+
+
 def parse_number_like_uprn(row):
 
-    p = re.compile(r"((\d[A-Z]\d+)|([A-Z]|PF|BF|GF)?(\d+)([A-Z])?|(?<!')(^|\b)([A-Z]|GROUND)(\b|$)(?!'))")
+    p = NUMBER_LIKE_MASTER_REGEX
 
     split_pattern = re.compile(r"(?<=\d)(?=\D)|(?=\d)(?<=\D)")
 
@@ -558,9 +564,9 @@ def parse_number_like_uprn(row):
     for col in ['SUB_BUILDING_NAME', 'BUILDING_NAME']:
         if len(row[col]):
             matches = list(re.finditer(p, row[col]))
-            units.append(flatten([re.split(split_pattern, match.group(1))
-                          if re.search(r'\dF\d', match.group(1)) is None else [match.group(1)]
-                          for match in matches]))
+            units.append(flatten([re.split(split_pattern, match.group(2))
+             if re.search(r'\dF\d', match.group(2)) is None else [match.group(2)]
+             for match in matches]))
 
     if len(row['BUILDING_NUMBER']):
         units.append([row['BUILDING_NUMBER']])
@@ -612,6 +618,7 @@ def count_n_tenement(df):
     df = pd.concat(groups)
 
     return df
+
 
 def indexing_uprn(df):
 
