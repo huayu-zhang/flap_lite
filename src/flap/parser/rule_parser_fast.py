@@ -3,8 +3,8 @@ import json
 
 from copy import deepcopy
 
-from src.utils import span_to_string, repl_char_from_string, span_end, flatten
-from src.database.sql import SqlDB
+from flap.utils import span_to_string, repl_char_from_string, span_end, flatten
+from flap.database.sql import SqlDB
 
 
 class RuleParserFast:

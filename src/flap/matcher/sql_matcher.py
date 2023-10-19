@@ -71,19 +71,23 @@ import pickle
 
 from scipy.spatial.distance import pdist
 
-from src.database.sql import SqlDB
-from src.parser.rule_parser_fast import RuleParserFast
-from src.preprocessing import postcode_preproc, address_line_preproc
+import flap
 
-from src.alignment.linear_assignment_alignment import LinearAssignmentAlignment
-from src.utils.progress_map import progress_map_tqdm_concurrent
+from flap.database.sql import SqlDB
+from flap.parser.rule_parser_fast import RuleParserFast
+from flap.preprocessing import postcode_preproc, address_line_preproc
+
+from flap.alignment.linear_assignment_alignment import LinearAssignmentAlignment
+from flap.utils.progress_map import progress_map_tqdm_concurrent
 
 # import time  # time
 
-DEFAULT_MODEL_PATH = [os.path.join(os.getcwd(), 'src', 'model', path)
-                      for path in os.listdir(os.path.join(os.getcwd(), 'src', 'model')) if 'clf' in path][0]
+MODULE_PATH = os.path.dirname(flap.__file__)
 
-DEFAULT_MULTIPLIER_INDEX = os.path.join(os.getcwd(), 'src', 'parser', 'multiplier_index.csv')
+DEFAULT_MODEL_PATH = [os.path.join(MODULE_PATH, 'model', path)
+                      for path in os.listdir(os.path.join(MODULE_PATH, 'model')) if 'clf' in path][0]
+
+DEFAULT_MULTIPLIER_INDEX = os.path.join(MODULE_PATH, 'parser', 'multiplier_index.csv')
 
 
 class SqlMatcher:

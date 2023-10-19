@@ -1,7 +1,7 @@
 import re
 import warnings
 
-from src.utils import repl_positions
+from flap.utils import repl_positions
 
 
 def is_postcode(string):

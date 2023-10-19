@@ -3,8 +3,8 @@ from scipy.optimize import linear_sum_assignment
 
 import numpy as np
 
-from src.utils import tokens_to_span_classes, tokenize_default
-from src.utils import Span
+from flap.utils import tokens_to_span_classes, tokenize_default
+from flap.utils import Span
 
 
 def string_to_2d_array(s):

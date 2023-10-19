@@ -11,7 +11,7 @@ licence of OS UPRN and download the address premium product to use *FLAP*
 
 From Test Pypi: 
 ```shell
-python3 -m pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ flap_lite
+python3 -m pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ --upgrade flap_lite
 ```
 
 Full documentation to be added

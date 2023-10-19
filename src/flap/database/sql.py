@@ -10,7 +10,7 @@ import sqlite3
 import re
 import itertools
 
-from src.utils import flatten
+from flap.utils import flatten
 
 
 class SqlDBManager:
