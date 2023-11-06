@@ -84,8 +84,11 @@ from flap.utils.progress_map import progress_map_tqdm_concurrent
 
 MODULE_PATH = os.path.dirname(flap.__file__)
 
-DEFAULT_MODEL_PATH = [os.path.join(MODULE_PATH, 'model', path)
-                      for path in os.listdir(os.path.join(MODULE_PATH, 'model')) if 'clf' in path][0]
+try:
+    DEFAULT_MODEL_PATH = [os.path.join(MODULE_PATH, 'model', path)
+                          for path in os.listdir(os.path.join(MODULE_PATH, 'model')) if 'clf' in path][0]
+except FileNotFoundError:
+    DEFAULT_MODEL_PATH = None
 
 DEFAULT_MULTIPLIER_INDEX = os.path.join(MODULE_PATH, 'parser', 'multiplier_index.csv')
 
@@ -106,10 +109,11 @@ class SqlMatcher:
         self.multiplier_indices = multiplier_indices
 
         if scorer is None:
-            try:
-                self.scorer = ClassifierScorer(DEFAULT_MODEL_PATH)
-            except FileNotFoundError:
-                pass
+            if DEFAULT_MODEL_PATH is not None:
+                try:
+                    self.scorer = ClassifierScorer(DEFAULT_MODEL_PATH)
+                except FileNotFoundError:
+                    pass
 
         if multiplier_indices is None:
             try:

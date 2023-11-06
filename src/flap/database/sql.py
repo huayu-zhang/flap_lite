@@ -29,6 +29,19 @@ class SqlDBManager:
         db_names = os.listdir(self.project_db_path)
         return db_names
 
+    @staticmethod
+    def create_db(path):
+        new_db_path = path
+
+        if os.path.exists(new_db_path):
+            warn('DB:%s exists, new database cannot be created.' % db_name)
+        else:
+            os.makedirs(new_db_path, exist_ok=True)
+            print('New db created at: %s' % new_db_path)
+            os.mkdir(os.path.join(new_db_path, 'raw'))
+            os.mkdir(os.path.join(new_db_path, 'sql'))
+            os.mkdir(os.path.join(new_db_path, 'db_config'))
+
     def create_global_db(self, db_name):
         new_db_path = os.path.join(self.global_db_path, db_name)
 
@@ -72,6 +85,7 @@ class SqlDBManager:
 
         return SqlDB(self.get_db_path(db_name, project_level))
 
+
 class SqlDB:
 
     def __init__(self, path_to_db):
@@ -102,18 +116,25 @@ class SqlDB:
         return self_str
 
     def get_table_names(self):
+
         conn = self.get_conn()
         cur = conn.cursor()
-        cur.execute("""SELECT name FROM sqlite_schema""")
-        res = cur.fetchall()
 
-        if len(res):
-            table_names = [list(name)[0] for name in res]
-        else:
+        try:
+            cur.execute("""SELECT name FROM sqlite_schema""")
+            res = cur.fetchall()
+
+            if len(res):
+                table_names = [list(name)[0] for name in res]
+            else:
+                table_names = []
+
+        except sqlite3.OperationalError:
             table_names = []
 
         cur.close()
         conn.close()
+
         return table_names
 
     def get_columns_of_table(self, table_name):
@@ -146,7 +167,6 @@ class SqlDB:
 
         db_status['table_raw_built'] = 'raw' in tables
         db_status['table_indexed_built'] = 'indexed' in tables
-        
 
         self.__db_status = db_status
 
