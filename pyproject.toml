@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "flap-lite"
-version = "0.6.5"
+version = "0.6.6"
 authors = [
   { name="Huayu Zhang", email="huayu.zhang@ed.ac.uk"},
 ]
@@ -50,7 +50,7 @@ dependencies = [
 where = ["src"]
 
 [tool.setuptools.package-data]
-flap = ["*.json", "*.csv"]
+flap = ["parser/*.json", "parser/*.csv"]
 
 [project.urls]
 "Homepage" = "https://github.com/huayu-zhang/flap_lite"
