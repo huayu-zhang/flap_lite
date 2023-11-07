@@ -11,12 +11,16 @@ import re
 import itertools
 
 from flap.utils import flatten
+import flap
+
+
+MODULE_PATH = os.path.dirname(flap.__file__)
 
 
 class SqlDBManager:
 
     def __init__(self, project_name=None):
-        self.global_db_path = os.path.join(os.getcwd(), 'db')
+        self.global_db_path = os.path.join(MODULE_PATH, 'db')
         self.project_name = project_name
         if project_name is not None:
             self.project_db_path = os.path.join(os.getcwd(), project_name, 'db')
@@ -152,6 +156,9 @@ class SqlDB:
         lines = s.split('\n')
         column_names = [line.split('"')[1] for line in lines[1:-1]]
 
+        cur.close()
+        conn.close()
+
         return column_names
 
     @property
@@ -175,8 +182,15 @@ class SqlDB:
     def drop_table(self, table):
         conn = self.get_conn()
         cur = conn.cursor()
-        cur.execute(f"""DROP TABLE IF EXISTS {table}""")
+
+        try:
+            cur.execute(f"""DROP TABLE IF EXISTS {table}""")
+
+        except sqlite3.OperationalError:
+            pass
+
         conn.commit()
+        cur.close()
         conn.close()
 
     def get_db_config(self):
@@ -279,7 +293,7 @@ class SqlDB:
         compile_pc1_mappings_region(self)
         compile_global_uniques(self)
 
-        path_thoroughfare_patterns = os.path.join(os.getcwd(), 'src', 'parser', 'thoroughfare_patterns.json')
+        path_thoroughfare_patterns = os.path.join(MODULE_PATH, 'parser', 'thoroughfare_patterns.json')
         os.system('cp %s %s' % (path_thoroughfare_patterns, self.sub_paths['thoroughfare_patterns']))
 
     def setup_database(self, if_exist='skip'):
@@ -387,13 +401,42 @@ class SqlDB:
             cur.execute(sql)
 
 
+def numeric_to_object(x):
+    if pd.isna(x):
+        return ''
+
+    elif isinstance(x, int):
+        return str(x)
+
+    elif isinstance(x, float):
+        return str(int(x))
+
+    else:
+        return x
+
+
+def convert_df_to_object(df):
+    for col in df:
+
+        if pd.api.types.is_object_dtype(df[col]):
+            df.loc[:, col] = df[col].fillna('')
+
+        elif pd.api.types.is_numeric_dtype(df[col]):
+            df.loc[:, col] = df[col].apply(lambda x: numeric_to_object(x))
+
+        else:
+            df.loc[:, col] = df[col]
+
+    return df
+
+
 def _parsing_func(sql_db):
     zip_path = [os.path.join(sql_db.sub_paths['raw'], file)
                 for file in os.listdir(sql_db.sub_paths['raw']) if '.zip' in file][0]
 
-    db_file = sql_db.sub_paths['sql_db']
+    sql_db.drop_table('raw')
 
-    conn = sqlite3.connect(db_file)
+    conn = sql_db.get_conn()
 
     with ZipFile(zip_path, 'r') as z:
         
@@ -417,7 +460,7 @@ def _parsing_func(sql_db):
 
             print('Save to SQL database')
 
-            gpkg_db.to_sql(name='raw', con=conn, if_exists='replace', dtype='TEXT', index=False)
+            gpkg_db.to_sql(name='raw', con=conn, if_exists='append', dtype='TEXT', index=False)
 
             print('Raw table building finished')
 
@@ -500,7 +543,7 @@ def compile_pc1_uniques(sql_db):
 
 
 def compile_pc1_mappings_region(sql_db):
-    path_pc1_region_mappings = os.path.join(os.getcwd(), 'src', 'parser', 'pc1_mappings_region.json')
+    path_pc1_region_mappings = os.path.join(MODULE_PATH, 'parser', 'pc1_mappings_region.json')
     os.system('cp %s %s' % (path_pc1_region_mappings, sql_db.sub_paths['pc1_mappings_region']))
 
 
@@ -568,9 +611,52 @@ def type_of_micro(row):
 
 
 NUMBER_LIKE_MASTER_REGEX = re.compile(
-    r"(FLAT|UNIT|BUILDING|ROOM|BLOCK|BONDS?|FL|PF|BF|GF|APARTMENT|\(F|F|-|\()? ?"
-    r"((\dF\d+)|(\d+[A-Z]\d+)|([A-EG-Z])?(\d+)([A-Z])?|(?<!')(^|\b)([A-Z]|GROUND)($|\b)(?!'))"
+    r"(FLAT|UNIT|BUILDING|ROOM|BLOCK|BONDS?|FL|APARTMENT|\(F|F|-|\()? ?"
+    r"((\dF\d+)|(\d+[A-Z]\d+)|([A-EG-Z])?(\d+)([A-Z])?|(?<!')(^|\b)([A-Z]|PF\d?|BF\d?|GF\d?)($|\b)(?!'))"
     r"\)?")
+
+
+sbn_det_dict = {
+    'level_det': ['BASEMENT', 'BOTTOM', 'GROUND', 'LOWER', 'FIRST', 'SECOND', 'THIRD',
+                  'FOURTH', 'MIDDLE', 'MID', 'UPPER', 'ATTIC', 'TOP'],
+    'seperator': ['APARTMENT', 'FLOOR', 'FLAT'],
+    'flat_det': ['FRONT', 'REAR', 'LEFT', 'RIGHT', 'CENTRE']
+}
+
+sbn_det_tokens = []
+
+for k, v in sbn_det_dict.items():
+    sbn_det_tokens.extend(v)
+
+
+sbn_parse_rule = {
+    'level_det': r"%s" % '|'.join(sbn_det_dict['level_det']),
+    'flat_det': r"%s" % '|'.join(sbn_det_dict['flat_det'])
+}
+
+
+def parse_sbn_det(s):
+
+    m_level = re.search(sbn_parse_rule['level_det'], s)
+    m_flat = re.search(sbn_parse_rule['flat_det'], s)
+
+    try:
+        level = m_level.group(0)
+    except AttributeError:
+        level = ''
+
+    try:
+        flat = m_flat.group(0) if m_flat is not None else ''
+
+    except AttributeError:
+        flat = ''
+
+    return level, flat
+
+
+def all_tokens_in_all(s):
+    list_of_tokens = re.split(r' ', s)
+    return all([t in sbn_det_tokens for t in list_of_tokens])
 
 
 def parse_number_like_uprn(row):
@@ -581,12 +667,23 @@ def parse_number_like_uprn(row):
 
     units = list()
 
-    for col in ['SUB_BUILDING_NAME', 'BUILDING_NAME']:
-        if len(row[col]):
-            matches = list(re.finditer(p, row[col]))
-            units.append(flatten([re.split(split_pattern, match.group(2))
-             if re.search(r'\dF\d', match.group(2)) is None else [match.group(2)]
-             for match in matches]))
+    if len(row['SUB_BUILDING_NAME']):
+        matches = list(re.finditer(p, row['SUB_BUILDING_NAME']))
+        units.append(
+            flatten([re.split(split_pattern, match.group(2))
+                     if re.search(r'\dF\d', match.group(2)) is None else [match.group(2)]
+                     for match in matches]))
+
+        if all_tokens_in_all(row['SUB_BUILDING_NAME']):
+            level, flat = parse_sbn_det(row['SUB_BUILDING_NAME'])
+            units.append([level, flat])
+
+    if len(row['BUILDING_NAME']):
+        matches = list(re.finditer(p, row['BUILDING_NAME']))
+        units.append(
+            flatten([re.split(split_pattern, match.group(2))
+                     if re.search(r'\dF\d', match.group(2)) is None else [match.group(2)]
+                     for match in matches]))
 
     if len(row['BUILDING_NUMBER']):
         units.append([row['BUILDING_NUMBER']])
