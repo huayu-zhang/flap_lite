@@ -685,6 +685,10 @@ def parse_number_like_uprn(row):
                      if re.search(r'\dF\d', match.group(2)) is None else [match.group(2)]
                      for match in matches]))
 
+        if all_tokens_in_all(row['SUB_BUILDING_NAME']):
+            level, flat = parse_sbn_det(row['SUB_BUILDING_NAME'])
+            units.append([level, flat])
+
     if len(row['BUILDING_NUMBER']):
         units.append([row['BUILDING_NUMBER']])
 

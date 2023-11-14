@@ -102,11 +102,14 @@ class SqlMatcher:
         ['POST_TOWN', 'number_like_0']
     ]
 
-    def __init__(self, sql_db, scorer=None, multiplier_indices=None):
+    def __init__(self, sql_db, parser=None, scorer=None, multiplier_indices=None):
         self.sql_db = sql_db
-        self.parser = RuleParserFast(sql_db)
+        self.parser = parser
         self.scorer = scorer
         self.multiplier_indices = multiplier_indices
+
+        if self.parser is None:
+            self.parser = RuleParserFast(sql_db)
 
         if scorer is None:
             if DEFAULT_MODEL_PATH is not None:
@@ -449,6 +452,9 @@ def prepare_uprn(row):
     columns = ['ORGANISATION_NAME', 'DEPARTMENT_NAME', 'SUB_BUILDING_NAME', 'BUILDING_NAME', 'BUILDING_NUMBER',
                'DEPENDENT_THOROUGHFARE', 'THOROUGHFARE', 'DOUBLE_DEPENDENT_LOCALITY', 'DEPENDENT_LOCALITY',
                'POST_TOWN']
+
+    for col in columns:
+        print(col, row[col])
 
     d_text = {col: re.sub(p, repl_func, row[col]) for col in columns}
 
