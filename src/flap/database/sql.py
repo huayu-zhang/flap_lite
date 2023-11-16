@@ -1,17 +1,15 @@
-from zipfile import ZipFile
-import csv
-import io
 import pandas as pd
-import geopandas as gpd
 import json
 import os
-import tqdm
 import sqlite3
-import re
-import itertools
+import shutil
+from warnings import warn
 
-from flap.utils import flatten
 import flap
+
+from flap.database.db_import import db_import
+from flap.database.db_build_vocabulary import compile_pc1_uniques, compile_pc1_mappings_region, compile_global_uniques
+from flap.database.db_index import db_index
 
 
 MODULE_PATH = os.path.dirname(flap.__file__)
@@ -36,6 +34,8 @@ class SqlDBManager:
     @staticmethod
     def create_db(path):
         new_db_path = path
+
+        db_name = os.path.basename(path)
 
         if os.path.exists(new_db_path):
             warn('DB:%s exists, new database cannot be created.' % db_name)
@@ -152,9 +152,14 @@ class SqlDB:
         """, table_name)
         res = cur.fetchall()
 
-        s = res[0][0]
-        lines = s.split('\n')
-        column_names = [line.split('"')[1] for line in lines[1:-1]]
+        try:
+            s = res[0][0]
+            lines = s.split('\n')
+            column_names = [line.split('"')[1] for line in lines[1:-1]]
+        except TypeError:
+            column_names = []
+        except IndexError:
+            column_names = []
 
         cur.close()
         conn.close()
@@ -184,10 +189,10 @@ class SqlDB:
         cur = conn.cursor()
 
         try:
-            cur.execute(f"""DROP TABLE IF EXISTS {table}""")
+            cur.execute(f"""DROP TABLE {table}""")
 
         except sqlite3.OperationalError:
-            pass
+            print('Table not exist')
 
         conn.commit()
         cur.close()
@@ -247,7 +252,17 @@ class SqlDB:
             print('db_config created')
         return sql_config
 
-    def build_raw(self, if_exist='skip'):
+    def setup_database(self, if_exists='skip'):
+        self.build_raw(if_exists=if_exists)
+        self.build_vocabulary()
+        self.indexing_db(if_exists=if_exists)
+
+    def build(self, if_exists='skip'):
+        self.build_raw(if_exists=if_exists)
+        self.build_vocabulary()
+        self.indexing_db(if_exists=if_exists)
+
+    def build_raw(self, if_exists='skip'):
         db_status = self.db_status
 
         print(db_status)
@@ -255,37 +270,38 @@ class SqlDB:
         if not db_status['raw_added']:
             raise FileNotFoundError('Add raw database files to [db_path]/raw first and then run build')
 
-        if if_exist == 'skip':
+        if if_exists == 'skip':
 
             if db_status['table_raw_built']:
-                print('Table raw exists, build skipped. Use if_exist="replace", if you want to create a new db')
+                print('Table raw exists, build skipped. Use if_exists="replace", if you want to create a new db')
             else:
-                _parsing_func(self)
+                db_import(self)
 
-        elif if_exist == 'replace':
+        elif if_exists == 'replace':
 
             self.drop_table('raw')
-            _parsing_func(self)
+            db_import(self)
 
-    def indexing_db(self, if_exist='skip'):
+    def indexing_db(self, if_exists='skip'):
         db_status = self.db_status
 
-        if if_exist == 'skip':
+        if if_exists == 'skip':
 
             if db_status['table_indexed_built']:
-                print('TABLE indexed exists, build skipped. Use if_exist="replace", if you want to create a new db')
+                print('TABLE indexed exists, build skipped. Use if_exists="replace", if you want to create a new db')
             else:
-                _indexing_database(self)
+                db_index(self)
                 self.delete_temp()
 
-        elif if_exist == 'replace':
+        elif if_exists == 'replace':
 
             self.drop_table('indexed')
-            _indexing_database(self)
+            db_index(self)
             self.delete_temp()
 
     def build_vocabulary(self):
 
+        print('Start building vocabularies')
         if not os.path.exists(self.sub_paths['vocabulary']):
             os.mkdir(self.sub_paths['vocabulary'])
 
@@ -294,12 +310,9 @@ class SqlDB:
         compile_global_uniques(self)
 
         path_thoroughfare_patterns = os.path.join(MODULE_PATH, 'parser', 'thoroughfare_patterns.json')
-        os.system('cp %s %s' % (path_thoroughfare_patterns, self.sub_paths['thoroughfare_patterns']))
+        shutil.copy(path_thoroughfare_patterns, self.sub_paths['thoroughfare_patterns'])
 
-    def setup_database(self, if_exist='skip'):
-        self.build_raw(if_exist=if_exist)
-        self.build_vocabulary()
-        self.indexing_db(if_exist=if_exist)
+        print('Finished building vocabularies')
 
     def get_conn(self):
         return sqlite3.connect(self.sub_paths['sql_db'], timeout=10)
@@ -399,368 +412,3 @@ class SqlDB:
         with self.get_conn() as conn:
             cur = conn.cursor()
             cur.execute(sql)
-
-
-def numeric_to_object(x):
-    if pd.isna(x):
-        return ''
-
-    elif isinstance(x, int):
-        return str(x)
-
-    elif isinstance(x, float):
-        return str(int(x))
-
-    else:
-        return x
-
-
-def convert_df_to_object(df):
-    for col in df:
-
-        if pd.api.types.is_object_dtype(df[col]):
-            df.loc[:, col] = df[col].fillna('')
-
-        elif pd.api.types.is_numeric_dtype(df[col]):
-            df.loc[:, col] = df[col].apply(lambda x: numeric_to_object(x))
-
-        else:
-            df.loc[:, col] = df[col]
-
-    return df
-
-
-def _parsing_func(sql_db):
-    zip_path = [os.path.join(sql_db.sub_paths['raw'], file)
-                for file in os.listdir(sql_db.sub_paths['raw']) if '.zip' in file][0]
-
-    sql_db.drop_table('raw')
-
-    conn = sql_db.get_conn()
-
-    with ZipFile(zip_path, 'r') as z:
-        
-        zz_files = [zz_file for zz_file in z.namelist()]
-
-        if any('.gpkg' in zz_file for zz_file in zz_files):
-
-            print('.gpkg database found. Starting to read db file')
-
-            zz_data = io.BytesIO(z.read(zz_files[0]))
-
-            gpkg_db = gpd.read_file(zz_data, layer='delivery_point_address')
-
-            print('convert to object type')
-
-            gpkg_db = convert_df_to_object(gpkg_db)
-
-            cols_upper = [col.upper() for col in gpkg_db.columns]
-
-            gpkg_db.columns = cols_upper
-
-            print('Save to SQL database')
-
-            gpkg_db.to_sql(name='raw', con=conn, if_exists='append', dtype='TEXT', index=False)
-
-            print('Raw table building finished')
-
-        elif any('.zip' in zz_file for zz_file in zz_files):
-            print('.zip database found. Starting to read db file')
-
-            chunk_size = int(1e5)
-            rows = []
-            data_index = '28'
-
-            sql_config = sql_db.get_db_config()
-
-            zz_files = [zz_file for zz_file in z.namelist() if '.zip' in zz_file]
-
-            for zz_file in tqdm.tqdm(zz_files):  
-                zz_data = io.BytesIO(z.read(zz_file))
-
-                with ZipFile(zz_data, 'r') as zz:
-                    csv_files = [csv_file for csv_file in zz.namelist() if '.csv' in csv_file]
-
-                    for csv_file in csv_files:
-
-                        with zz.open(csv_file, 'r') as f:
-
-                            lines = [line.decode() for line in f.readlines()]
-
-                            reader = csv.reader(lines)
-
-                            for row in reader:
-                                if row[0] == data_index:
-                                    rows.append(row)
-
-                        while len(rows) > chunk_size:
-                            df = pd.DataFrame.from_records(rows, columns=list(sql_config.keys()))
-                            df.to_sql(name='raw', con=conn, if_exists='append', dtype=sql_config, index=False)
-                            rows = rows[chunk_size:]
-
-            df = pd.DataFrame.from_records(rows, columns=list(sql_config.keys()))
-            df.to_sql(name='raw', con=conn, if_exists='append', dtype=sql_config, index=False)
-            print('Raw table building finished')
-
-        else:
-            pass
-
-    conn.close()
-
-
-def compile_pc1_uniques(sql_db):
-    batch_gen = sql_db.sql_table_batch_by_column(
-        table_name='raw', by_columns='POSTCODE', batch_size=int(1e5),
-        match_func=lambda next_res, res: next_res[15].split(' ')[0] == res[-1][15].split(' ')[0])
-
-    columns_to_compile = ["THOROUGHFARE", "DOUBLE_DEPENDENT_LOCALITY", "DEPENDENT_LOCALITY", "POST_TOWN"]
-
-    pc1_mappings = {}
-
-    for col in columns_to_compile:
-        pc1_mappings[col] = {}
-
-    for df in tqdm.tqdm(batch_gen):
-
-        df['pc1'] = df.apply(lambda row: row['POSTCODE'].split(' ')[0], axis=1)
-
-        for pc1, group in df.groupby('pc1'):
-
-            for col in columns_to_compile:
-
-                uniques = group[col].unique().tolist()
-
-                try:
-                    uniques.remove('')
-                except ValueError:
-                    pass
-
-                if len(uniques):
-                    pc1_mappings[col][pc1] = uniques
-
-    with open(sql_db.sub_paths['pc1_mappings'], 'w') as f:
-        json.dump(pc1_mappings, f, indent=4)
-
-
-def compile_pc1_mappings_region(sql_db):
-    path_pc1_region_mappings = os.path.join(MODULE_PATH, 'parser', 'pc1_mappings_region.json')
-    os.system('cp %s %s' % (path_pc1_region_mappings, sql_db.sub_paths['pc1_mappings_region']))
-
-
-def compile_global_uniques(sql_db):
-    columns_to_compile = ["DOUBLE_DEPENDENT_LOCALITY", "DEPENDENT_LOCALITY", "POST_TOWN"]
-
-    for col in columns_to_compile:
-        res_sql = sql_db.sql_query("""
-                                   SELECT DISTINCT %s
-                                   FROM raw
-                                   """ % col)
-        res = list(itertools.chain(*res_sql))
-
-        try:
-            res.remove('')
-        except ValueError:
-            pass
-
-        with open(sql_db.sub_paths['unique_%s' % col], 'w') as f:
-            json.dump(res, f, indent=4)
-
-
-def _indexing_database(sql_db):
-    conn_temp = sql_db.get_conn_temp()
-
-    tasks_gen = sql_db.sql_table_batch_by_column('raw', 'POSTCODE', int(1e5))
-
-    for res in tqdm.tqdm(tasks_gen):
-        res_indexed = indexing_uprn(res)
-        res_indexed.to_sql(name='indexed',
-                           con=conn_temp,
-                           if_exists='append',
-                           dtype='TEXT',
-                           index=False)
-
-    sql_chunk_gen = pd.read_sql(sql='SELECT * FROM indexed', con=conn_temp, chunksize=int(1e5))
-
-    conn = sql_db.get_conn()
-
-    for chunk in tqdm.tqdm(sql_chunk_gen):
-        chunk.to_sql(name='indexed',
-                     con=conn,
-                     if_exists='append',
-                     dtype='TEXT',
-                     index=False
-                     )
-
-    conn.close()
-    conn_temp.close()
-
-
-def type_of_macro(row):
-
-    cols = ['DEPENDENT_THOROUGHFARE', 'THOROUGHFARE', 'DOUBLE_DEPENDENT_LOCALITY', 'DEPENDENT_LOCALITY']
-
-    return ''.join([str(int(len(row[col]) > 0)) for col in cols])
-
-
-def type_of_micro(row):
-
-    cols = ['ORGANISATION_NAME', 'DEPARTMENT_NAME', 'SUB_BUILDING_NAME',
-            'BUILDING_NAME', 'BUILDING_NUMBER']
-
-    return ''.join([str(int(len(row[col]) > 0)) for col in cols])
-
-
-NUMBER_LIKE_MASTER_REGEX = re.compile(
-    r"(FLAT|UNIT|BUILDING|ROOM|BLOCK|BONDS?|FL|APARTMENT|\(F|F|-|\()? ?"
-    r"((\dF\d+)|(\d+[A-Z]\d+)|([A-EG-Z])?(\d+)([A-Z])?|(?<!')(^|\b)([A-Z]|PF\d?|BF\d?|GF\d?)($|\b)(?!'))"
-    r"\)?")
-
-
-sbn_det_dict = {
-    'level_det': ['BASEMENT', 'BOTTOM', 'GROUND', 'LOWER', 'FIRST', 'SECOND', 'THIRD',
-                  'FOURTH', 'MIDDLE', 'MID', 'UPPER', 'ATTIC', 'TOP'],
-    'seperator': ['APARTMENT', 'FLOOR', 'FLAT'],
-    'flat_det': ['FRONT', 'REAR', 'LEFT', 'RIGHT', 'CENTRE']
-}
-
-sbn_det_tokens = []
-
-for k, v in sbn_det_dict.items():
-    sbn_det_tokens.extend(v)
-
-
-sbn_parse_rule = {
-    'level_det': r"%s" % '|'.join(sbn_det_dict['level_det']),
-    'flat_det': r"%s" % '|'.join(sbn_det_dict['flat_det'])
-}
-
-
-def parse_sbn_det(s):
-
-    m_level = re.search(sbn_parse_rule['level_det'], s)
-    m_flat = re.search(sbn_parse_rule['flat_det'], s)
-
-    try:
-        level = m_level.group(0)
-    except AttributeError:
-        level = ''
-
-    try:
-        flat = m_flat.group(0) if m_flat is not None else ''
-
-    except AttributeError:
-        flat = ''
-
-    return level, flat
-
-
-def all_tokens_in_all(s):
-    list_of_tokens = re.split(r' ', s)
-    return all([t in sbn_det_tokens for t in list_of_tokens])
-
-
-def parse_number_like_uprn(row):
-
-    p = NUMBER_LIKE_MASTER_REGEX
-
-    split_pattern = re.compile(r"(?<=\d)(?=\D)|(?=\d)(?<=\D)")
-
-    units = list()
-
-    if len(row['SUB_BUILDING_NAME']):
-        matches = list(re.finditer(p, row['SUB_BUILDING_NAME']))
-        units.append(
-            flatten([re.split(split_pattern, match.group(2))
-                     if re.search(r'\dF\d', match.group(2)) is None else [match.group(2)]
-                     for match in matches]))
-
-        if all_tokens_in_all(row['SUB_BUILDING_NAME']):
-            level, flat = parse_sbn_det(row['SUB_BUILDING_NAME'])
-            units.append([level, flat])
-
-    if len(row['BUILDING_NAME']):
-        matches = list(re.finditer(p, row['BUILDING_NAME']))
-        units.append(
-            flatten([re.split(split_pattern, match.group(2))
-                     if re.search(r'\dF\d', match.group(2)) is None else [match.group(2)]
-                     for match in matches]))
-
-        if all_tokens_in_all(row['SUB_BUILDING_NAME']):
-            level, flat = parse_sbn_det(row['SUB_BUILDING_NAME'])
-            units.append([level, flat])
-
-    if len(row['BUILDING_NUMBER']):
-        units.append([row['BUILDING_NUMBER']])
-
-    res = flatten(units[::-1])
-
-    if len(res) < 5:
-        res += [''] * (5 - len(res))
-    elif len(res) > 5:
-        res = res[:5]
-
-    return pd.Series(res)
-
-
-def split_postcode_uprn(row):
-
-    p = re.compile(r'([A-Z]{1,2})([0-9][A-Z0-9]?)(?: +)?([0-9])([A-Z])([A-Z])')
-
-    match = re.match(p, row['POSTCODE'])
-
-    pc0, pc1 = ''.join([match.group(i) for i in range(1, 3)]), ''.join([match.group(i) for i in range(3, 6)])
-
-    pc_area, pc_district, pc_sector, pc_unit_0, pc_unit_1 = [match.group(i) for i in range(1, 6)]
-
-    return pd.Series([pc0, pc1, pc_area, pc_district, pc_sector, pc_unit_0, pc_unit_1])
-
-
-def count_n_tenement(df):
-
-    df['n_tenement'] = 1
-
-    groups = []
-
-    for (i, j), group in df.groupby(['BUILDING_NAME', 'POSTCODE']):
-        if (i != '') and (len(group) > 1):
-            group['n_tenement'] = len(group)
-
-        groups.append(group)
-
-    df = pd.concat(groups)
-
-    groups = []
-
-    for (i, j), group in df.groupby(['BUILDING_NUMBER', 'POSTCODE']):
-        if (i != '') and (len(group) > 1):
-            group['n_tenement'] = len(group)
-        groups.append(group)
-
-    df = pd.concat(groups)
-
-    return df
-
-
-def indexing_uprn(df):
-
-    df = count_n_tenement(df)
-
-    df['type_of_micro'] = df.apply(type_of_micro, axis=1)
-    df['type_of_macro'] = df.apply(type_of_macro, axis=1)
-
-    df[['number_like_%s' % i for i in range(5)]] = df.apply(parse_number_like_uprn, axis=1)
-    df[['pc0', 'pc1', 'pc_area', 'pc_district', 'pc_sector', 'pc_unit_0', 'pc_unit_1']] = \
-        df.apply(split_postcode_uprn, axis=1)
-
-    return df
-
-
-# dm = SqlDBManager()
-#
-# dm.list_global_db()
-#
-# sql_db = dm.get_db(db_name='the_database')
-#
-# sql_db.setup_database(if_exist='replace')
-#
-# sql_db.sql_query("select * from indexed")
