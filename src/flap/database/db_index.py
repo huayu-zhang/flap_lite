@@ -51,7 +51,7 @@ def db_index(sql_db):
 
     if len(range_rows):
 
-        df_range_rows = pd.concat([range_rows])
+        df_range_rows = pd.concat(range_rows)
 
         range_indexed = indexing_uprn(df_range_rows)
 
