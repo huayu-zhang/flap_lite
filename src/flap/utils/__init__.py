@@ -1,10 +1,11 @@
 """
-Consider split in different files later
+Consider split to different files later
 
 """
+
 import pandas as pd
 import numpy as np
-
+from .cpu_count import available_cpu_count
 
 # Span and token operations
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "flap-lite"
-version = "0.6.8"
+version = "0.6.10"
 authors = [
   { name="Huayu Zhang", email="huayu.zhang@ed.ac.uk"},
 ]
@@ -33,6 +33,7 @@ dependencies = [
     "openpyxl==3.1.2",
     "packaging==23.0",
     "pandas==1.5.3",
+    "psutil==5.9.6",
     "pyproj==3.5.0",
     "python-dateutil==2.8.2",
     "pytz==2023.3",

@@ -5,13 +5,16 @@ import pandas as pd
 class SqlDBInMemory:
 
     def __init__(self):
-        self.conn = sqlite3.connect(':memory:')
         self.columns_dict = {}
+
+    @staticmethod
+    def get_conn():
+        return sqlite3.connect('file:cachedb?mode=memory&cache=shared', timeout=10)
 
     def load_csv(self, path, table_name, chunksize=10000):
 
         print('Start loading DB to memory')
-        db_chunks = pd.read_csv(path, chunksize=chunksize, dtype='object')
+        db_chunks = pd.read_csv(path, chunksize=chunksize, dtype='object', index_col=0)
 
         i = 0
 
@@ -20,13 +23,13 @@ class SqlDBInMemory:
                 df = next(db_chunks)
                 i += 1
                 df.fillna('', inplace=True)
-                df.to_sql(name=table_name, con=self.conn, if_exists='append', dtype='TEXT', index=False)
+                df.to_sql(name=table_name, con=self.get_conn(), if_exists='append', dtype='TEXT', index=False)
                 print('Chunk %s loaded' % i, end='\r')
+
+                self.columns_dict[table_name] = df.columns.to_list()
 
             except StopIteration:
                 break
-
-        self.columns_dict[table_name] = df.columns.to_list()
 
         print('DB Loading Finished')
 
@@ -35,11 +38,12 @@ class SqlDBInMemory:
 
     def sql_query(self, query):
 
-        cur = self.conn.cursor()
+        conn = self.get_conn()
+        cur = conn.cursor()
         cur.execute(query)
         res = cur.fetchall()
         cur.close()
-
+        conn.close()
         return res
 
     def create_index(self, table_name, columns):
@@ -52,9 +56,12 @@ class SqlDBInMemory:
             ', '.join(columns)
         )
 
-        cur = self.conn.cursor()
+        conn = self.get_conn()
+        cur = conn.cursor()
         cur.execute(sql)
         cur.close()
+        conn.close()
 
     def close(self):
-        self.conn.close()
+        conn = self.get_conn()
+        conn.close()

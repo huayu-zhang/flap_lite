@@ -4,6 +4,7 @@ import os
 import sqlite3
 import shutil
 from warnings import warn
+from tqdm import tqdm
 
 import flap
 
@@ -45,6 +46,7 @@ class SqlDBManager:
             os.mkdir(os.path.join(new_db_path, 'raw'))
             os.mkdir(os.path.join(new_db_path, 'sql'))
             os.mkdir(os.path.join(new_db_path, 'db_config'))
+            os.mkdir(os.path.join(new_db_path, 'csv'))
 
     def create_global_db(self, db_name):
         new_db_path = os.path.join(self.global_db_path, db_name)
@@ -57,6 +59,7 @@ class SqlDBManager:
             os.mkdir(os.path.join(new_db_path, 'raw'))
             os.mkdir(os.path.join(new_db_path, 'sql'))
             os.mkdir(os.path.join(new_db_path, 'db_config'))
+            os.mkdir(os.path.join(new_db_path, 'csv'))
 
     def create_project_db(self, db_name):
         new_db_path = os.path.join(self.project_db_path, db_name)
@@ -69,6 +72,7 @@ class SqlDBManager:
             os.mkdir(os.path.join(new_db_path, 'raw'))
             os.mkdir(os.path.join(new_db_path, 'sql'))
             os.mkdir(os.path.join(new_db_path, 'db_config'))
+            os.mkdir(os.path.join(new_db_path, 'csv'))
 
     def get_db_path(self, db_name, project_level=False):
         if not project_level:
@@ -100,6 +104,7 @@ class SqlDB:
             'db_config': os.path.join(self.db_path, 'db_config'),
             'sql_db': os.path.join(self.db_path, 'sql', 'db.sqlite3'),
             'sql_db_temp': os.path.join(self.db_path, 'sql', 'db_temp.sqlite3'),
+            'csv': os.path.join(self.db_path, 'csv'),
             'vocabulary': os.path.join(self.db_path, 'vocabulary'),
             'pc1_mappings': os.path.join(self.db_path, 'vocabulary', 'pc1_mappings.json'),
             'pc1_mappings_region': os.path.join(self.db_path, 'vocabulary', 'pc1_mappings_region.json'),
@@ -256,12 +261,16 @@ class SqlDB:
         self.build_raw(if_exists=if_exists)
         self.build_vocabulary()
         self.indexing_db(if_exists=if_exists)
+        self.build_csv()
+        print('Database Setup complete!')
 
     def build(self, if_exists='skip'):
         self.build_raw(if_exists=if_exists)
         self.build_vocabulary()
         self.indexing_db(if_exists=if_exists)
-
+        self.build_csv()
+        print('Database Setup complete!')
+        
     def build_raw(self, if_exists='skip'):
         db_status = self.db_status
 
@@ -313,6 +322,26 @@ class SqlDB:
         shutil.copy(path_thoroughfare_patterns, self.sub_paths['thoroughfare_patterns'])
 
         print('Finished building vocabularies')
+
+    def build_csv(self):
+
+        for table_name in ['indexed', 'expanded']:
+
+            print(f'Start saving {table_name} to csv for in-memory DB')
+
+            header = True
+
+            cols = self.get_columns_of_table(table_name)
+
+            sql = f'select * from {table_name}'
+
+            chunk_gen = pd.read_sql(sql, con=self.get_conn(), columns=cols, chunksize=int(1e5))
+
+            for chunk in tqdm(chunk_gen):
+
+                chunk.to_csv(os.path.join(self.sub_paths['csv'], f'{table_name}.csv.gz'),
+                             header=header, mode='a', compression='gzip')
+                header = False
 
     def get_conn(self):
         return sqlite3.connect(self.sub_paths['sql_db'], timeout=10)

@@ -102,21 +102,23 @@ class SqlMatcher:
         ['POST_TOWN', 'number_like_0']
     ]
 
-    def __init__(self, sql_db, parser=None, scorer=None, multiplier_indices=None):
+    def __init__(self, sql_db, parser=None, scorer_path=None, multiplier_indices=None):
         self.sql_db = sql_db
         self.parser = parser
-        self.scorer = scorer
         self.multiplier_indices = multiplier_indices
+        self.scorer = None
 
         if self.parser is None:
             self.parser = RuleParserFast(sql_db)
 
-        if scorer is None:
+        if scorer_path is None:
             if DEFAULT_MODEL_PATH is not None:
                 try:
                     self.scorer = ClassifierScorer(DEFAULT_MODEL_PATH)
                 except FileNotFoundError:
                     pass
+        else:
+            self.scorer = ClassifierScorer(scorer_path)
 
         if multiplier_indices is None:
             try:
@@ -135,11 +137,12 @@ class SqlMatcher:
 #         self.t_log[checkpoint_name] = time.time() - self.t_temp  # time
 #         self.t_temp = time.time()  # time
 
-    def _query(self, query, parsed):
+    def _query(self, query, table_name, parsed):
 
         query_task = {k: parsed['FOR_QUERY'][k].replace("'", "''") for k in query}
 
-        query_string = query_task_to_sql(query_task)
+        query_string = query_task_to_sql(query_task, table_name)
+
         res = pd.DataFrame(self.sql_db.sql_query(query_string), columns=self.sql_db.get_columns_of_table('indexed'))
 
         return res
@@ -199,137 +202,147 @@ class SqlMatcher:
 
         results = []
 
-        for query in self.queries:
+        for table_name in ['indexed', 'expanded']:
+            # Start of main loop on Tables
 
-            # print(query)
-            try:
-                res = self._query(query, parsed)
+            row_matched = []
 
-            except KeyError:
-                parsed = self.parser.parse(address, method='all')
+            for query in self.queries:
+
+                # Start of Loop Over queries
+
                 try:
-                    res = self._query(query, parsed)
+                    res = self._query(query, table_name, parsed)
+
                 except KeyError:
-                    continue
-
-            current_bw += len(res)
-
-            # Matching loop
-
-            for i, row in res.iterrows():
-                results.append(self._match_one_record(parsed, row))
-
-            # Deal with multiplier
-
-            multi_regex = re.compile(r'(\d)[A-Z](\d+)')
-
-            multi_regex_matches = {k: re.match(multi_regex, v) for k, v in parsed['NUMBER_LIKE'].items()}
-
-            if any([multi_regex_matches[k] is not None for k in multi_regex_matches]):
-
-                alt_address = address
-
-                alt_parsed = parsed.copy()
-
-                number_like = alt_parsed['NUMBER_LIKE']
-
-                level = 1
-                key = 'number_like_0'
-                flat = 1
-
-                list_of_indices = []
-
-                for k, m in multi_regex_matches.items():
-                    if m is None:
-                        list_of_indices.append(number_like[k])
-                    else:
-                        level = int(m.group(1))
-                        flat = int(m.group(2))
-                        key = k
-                        break
-
-                if level == 1:
-                    alt_parsed['NUMBER_LIKE'][key] = str(flat)
-                    alt_address = re.sub(pattern=parsed['FOR_QUERY'][key], repl=alt_parsed['NUMBER_LIKE'][key],
-                                         string=alt_address)
-
-                    alt_parsed['TEXTUAL'] = strip_number_like(alt_address)
-
-                    for i, row in res.iterrows():
-                        results.append(self._match_one_record(alt_parsed, row))
-
-                    continue
-
-                if len(list_of_indices) == 0:
-                    continue
-
-                if self.multiplier_indices is not None:
-
-                    max_level = 0
-                    max_flat = 0
-
+                    parsed = self.parser.parse(address, method='all')
                     try:
-                        index = '--'.join(['-'.join(list_of_indices), parsed['FOR_QUERY']['POSTCODE']])
-
-                        if index in self.multiplier_indices.index:
-                            max_level = self.multiplier_indices.loc[index, 'max_level']
-                            max_flat = self.multiplier_indices.loc[index, 'max_flat']
-
+                        res = self._query(query, table_name, parsed)
                     except KeyError:
+                        continue
 
-                        pass
+                current_bw += len(res)
 
-                    for i, row in res.iterrows():
-
-                        try:
-                            n_tenement = int(row['n_tenement'])
-                        except ValueError:
-                            n_tenement = 1
-
-                        multiplier, _ = guess_multiplier(max_level, max_flat, n_tenement)
-                        alt_number = (level - 1) * multiplier + flat
-                        alt_parsed['NUMBER_LIKE'][key] = str(alt_number)
-
-                        alt_address = re.sub(pattern=parsed['FOR_QUERY'][key], repl=alt_parsed['NUMBER_LIKE'][key],
-                                             string=alt_address)
-                        alt_parsed['TEXTUAL'] = strip_number_like(alt_address)
-
-                        results.append(self._match_one_record(alt_parsed, row))
-
-            # Deal with Special
-
-            number_like = list(parsed['NUMBER_LIKE'].values())
-            if 'GROUND' in number_like:
-                the_index = 'number_like_%s' % number_like.index('GROUND')
-                alt_parsed = parsed.copy()
-                alt_parsed['NUMBER_LIKE'][the_index] = '0'
+                # Matching loop
 
                 for i, row in res.iterrows():
-                    results.append(self._match_one_record(alt_parsed, row))
+                    row_d = row.to_dict()
 
-            # Score and select
+                    if row_d not in row_matched:
+                        results.append(self._match_one_record(parsed, row))
+                        row_matched.append(row_d)
 
-            try:
-                if self.scorer is not None:
-                    X = [res['features'] for res in results]
-                    #                     t0 = time.time() # time
-                    scores = self.scorer.score_batch(X)
-                    #                     self.t_log['scorer'] = time.time() - t0 # time
-                    for res, score in zip(results, scores):
-                        res['score'] = score
+                # Deal with multiplier
 
-                best_res = max(results, key=lambda x: x['score'])
-                if best_res['score'] > score_threshold:
+                multi_regex = re.compile(r'(\d)[A-Z](\d+)')
+
+                multi_regex_matches = {k: re.match(multi_regex, v) for k, v in parsed['NUMBER_LIKE'].items()}
+
+                if any([multi_regex_matches[k] is not None for k in multi_regex_matches]):
+
+                    alt_address = address
+
+                    alt_parsed = parsed.copy()
+
+                    number_like = alt_parsed['NUMBER_LIKE']
+
+                    level = 1
+                    key = 'number_like_0'
+                    flat = 1
+
+                    list_of_indices = []
+
+                    for k, m in multi_regex_matches.items():
+                        if m is None:
+                            list_of_indices.append(number_like[k])
+                        else:
+                            level = int(m.group(1))
+                            flat = int(m.group(2))
+                            key = k
+                            break
+
+                    if level == 1:
+                        alt_parsed['NUMBER_LIKE'][key] = str(flat)
+                        alt_address = re.sub(pattern=parsed['FOR_QUERY'][key], repl=alt_parsed['NUMBER_LIKE'][key],
+                                             string=alt_address)
+
+                        alt_parsed['TEXTUAL'] = strip_number_like(alt_address)
+
+                        for i, row in res.iterrows():
+                            results.append(self._match_one_record(alt_parsed, row))
+
+                        continue
+
+                    if len(list_of_indices) == 0:
+                        continue
+
+                    if self.multiplier_indices is not None:
+
+                        max_level = 0
+                        max_flat = 0
+
+                        try:
+                            index = '--'.join(['-'.join(list_of_indices), parsed['FOR_QUERY']['POSTCODE']])
+
+                            if index in self.multiplier_indices.index:
+                                max_level = self.multiplier_indices.loc[index, 'max_level']
+                                max_flat = self.multiplier_indices.loc[index, 'max_flat']
+
+                        except KeyError:
+
+                            pass
+
+                        for i, row in res.iterrows():
+
+                            try:
+                                n_tenement = int(row['n_tenement'])
+                            except ValueError:
+                                n_tenement = 1
+
+                            multiplier, _ = guess_multiplier(max_level, max_flat, n_tenement)
+                            alt_number = (level - 1) * multiplier + flat
+                            alt_parsed['NUMBER_LIKE'][key] = str(alt_number)
+
+                            alt_address = re.sub(pattern=parsed['FOR_QUERY'][key], repl=alt_parsed['NUMBER_LIKE'][key],
+                                                 string=alt_address)
+                            alt_parsed['TEXTUAL'] = strip_number_like(alt_address)
+
+                            results.append(self._match_one_record(alt_parsed, row))
+
+                # End of dealing with multiplier
+
+                # Score and select
+
+                try:
+                    if self.scorer is not None:
+                        X = [res['features'] for res in results]
+                        #                     t0 = time.time() # time
+                        scores = self.scorer.score_batch(X)
+                        #                     self.t_log['scorer'] = time.time() - t0 # time
+
+                        for res, score in zip(results, scores):
+                            res['score'] = score
+
+                            if table_name == 'Expanded':
+                                res['score'] *= 0.9
+
+                    best_res = max(results, key=lambda x: x['score'])
+                    if best_res['score'] > score_threshold:
+                        stop_loop = True
+
+                except ValueError:
+                    pass
+
+                if current_bw > max_beam_width:
                     stop_loop = True
 
-            except ValueError:
-                pass
-
-            if current_bw > max_beam_width:
-                stop_loop = True
+                if stop_loop:
+                    break
 
             if stop_loop:
                 break
+
+            # End of main loop on Tables
 
         # End the main loop
 
@@ -348,6 +361,7 @@ class SqlMatcher:
 
         try:
             return self.match(address, max_beam_width, score_threshold, troubleshoot)
+
         except:
             try:
                 return {'score': 0, 'error': '\n'.join([address, traceback.format_exc()])}
@@ -407,11 +421,11 @@ class ClassifierScorer:
         return score
 
 
-def query_task_to_sql(query_task):
+def query_task_to_sql(query_task, table_name):
 
-    sql = """
+    sql = f"""
     SELECT *
-    FROM indexed
+    FROM {table_name}
     WHERE %s
     """ % ("\nAND ".join(["%s = '%s'" % (k, v) for k, v in query_task.items()]))
 
@@ -452,9 +466,6 @@ def prepare_uprn(row):
     columns = ['ORGANISATION_NAME', 'DEPARTMENT_NAME', 'SUB_BUILDING_NAME', 'BUILDING_NAME', 'BUILDING_NUMBER',
                'DEPENDENT_THOROUGHFARE', 'THOROUGHFARE', 'DOUBLE_DEPENDENT_LOCALITY', 'DEPENDENT_LOCALITY',
                'POST_TOWN']
-
-    for col in columns:
-        print(col, row[col])
 
     d_text = {col: re.sub(p, repl_func, row[col]) for col in columns}
 

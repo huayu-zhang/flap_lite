@@ -26,44 +26,34 @@ def db_index(sql_db):
 
     conn_temp = sql_db.get_conn_temp()
 
-    tasks_gen = sql_db.sql_table_batch_by_column('raw', 'POSTCODE', int(1e5))
-
-    range_rows = []
+    tasks_gen = sql_db.sql_table_batch_by_column('raw', 'POSTCODE', int(1e4))
 
     for df_chunk in tqdm(tasks_gen):
+
         # Process chunks of raw data and save to 'indexed' table
-        # expand index and save to 'expanded'
-        # collect ranges
-
         df_chunk = df_chunk.drop_duplicates()
-
         df_chunk['ex_label'] = '0'
 
         res_indexed = indexing_uprn(df_chunk)
-
         res_indexed.to_sql(name='indexed', con=conn_temp, if_exists='append', dtype='TEXT', index=False)
 
-        res_expanded = expand_number_like(res_indexed)
+        # get and index range
+        df_chunk_range = expand_bn(df_chunk)
+        res_range_indexed = indexing_uprn(df_chunk_range)
 
+        # add range
+        res_both = pd.concat([res_indexed, res_range_indexed])
+        res_both.reset_index(inplace=True)
+
+        # expand both and save to 'expanded'
+        res_expanded = expand_number_like(res_both)
         res_expanded.to_sql(name='expanded', con=conn_temp, if_exists='append', dtype='TEXT', index=False)
-
-        range_rows.append(expand_bn(df_chunk))
-
-    if len(range_rows):
-
-        df_range_rows = pd.concat(range_rows)
-
-        range_indexed = indexing_uprn(df_range_rows)
-
-        range_expanded = expand_number_like(range_indexed)
-
-        range_expanded.to_sql(name='expanded', con=conn_temp, if_exists='append', dtype='TEXT', index=False)
 
     # Saving to main database
 
     for table_name in ['indexed', 'expanded']:
 
-        pring('Saving to %s' % table_name)
+        print('Saving to %s' % table_name)
 
         sql_chunk_gen = pd.read_sql(sql='SELECT * FROM %s' % table_name, con=conn_temp, chunksize=int(1e5))
 
@@ -81,6 +71,7 @@ def db_index(sql_db):
     conn_temp.close()
 
     print('Finished database indexing')
+
 
 # Below are indexing functions
 
