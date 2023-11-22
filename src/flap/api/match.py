@@ -58,7 +58,45 @@ def _check_index(csv_file):
 
 def match(input_csv, db_path, output_file_path=None, raw_output_path=None,
           batch_size=10000, max_workers=None, in_memory_db=False, classifier_model_path=None):
+    """
+    This is the top level function for matching free-text addresses from a csv file to the OS ABP UPRN database.
 
+    Parameters
+    ----------
+    input_csv : str
+        Path to the csv file. The file needs to have two fields in the header ['input_id', 'input_address']
+    db_path : str
+        Path to the database built. See `flap.create_db()`
+    output_file_path : str, default None
+        Path for saving the output csv file, containing ['input_id', 'input_address', 'uprn', 'score']. If None, results
+        is saved to '[$pwd]/output.csv'
+    raw_output_path : str, default None
+        Path for save the batched raw output files. If None, raw output is saved to '[$pwd]/output_raw/'
+    batch_size : int, default 10000
+        Size of each batch
+    max_workers : int, default None
+        Number of processes. If None, the max cpu available is determined by `flap.utils.cpu_count.available_cpu_count()`
+    in_memory_db : bool, default False
+        If in-memory SQLite database is used. If True, a temp database is created in shared memory cache from pre-built
+        csv files
+    classifier_model_path : str, default None
+        The path to the pretrained sklearn classifier model. If None, the model is loaded from 'flap.__file__/*.clf'
+
+    Returns
+    -------
+    pandas.DataFrame
+        Match results
+    Examples
+    --------
+    >>> from flap import match
+    >>> input_csv = '...'
+    >>> db_path = '...'
+    >>> results = match(
+    ...    input_csv=input_csv,
+    ...    db_path=db_path
+    ...)
+    >>> print(results)
+    """
     # Initialise parameters
 
     if output_file_path is None:
