@@ -366,6 +366,12 @@ class SqlDB:
 
         return res
 
+    def sql_query_by_column_values(self, table_name, column, value_list):
+
+        in_clause = ', '.join(value_list)
+        res = self.sql_query(f"""select * from {table_name} where {column} IN ({in_clause})""")
+        return res
+
     def sql_query_batch(self, query, batch_size=int(1e5)):
         conn = self.get_conn()
         cur = conn.cursor()

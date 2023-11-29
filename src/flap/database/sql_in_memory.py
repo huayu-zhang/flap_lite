@@ -46,6 +46,12 @@ class SqlDBInMemory:
         conn.close()
         return res
 
+    def sql_query_by_column_values(self, table_name, column, value_list):
+
+        in_clause = ', '.join(value_list)
+        res = self.sql_query(f"""select * from {table_name} where {column} IN ({in_clause})""")
+        return res
+
     def create_index(self, table_name, columns):
 
         index_name = '__'.join(columns)

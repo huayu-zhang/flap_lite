@@ -15,17 +15,12 @@ from flap.parser.rule_parser_fast import RuleParserFast
 from flap.utils import join_uprn_fields, available_cpu_count
 
 
-def buf_count_newlines_gen(filename):
-    def _make_gen(reader):
-        while True:
-            b = reader(2 ** 16)
-            if not b:
-                break
-            yield b
+def csv_row_counter(filename):
 
-    with open(filename, "rb") as f:
-        count = sum(buf.count(b"\n") for buf in _make_gen(f.raw.read))
-    return count
+    with open(filename, 'r') as f:
+        row_count = sum(1 for _ in csv.reader(f))
+
+    return row_count
 
 
 def read_csv_header(filename):
@@ -100,10 +95,10 @@ def match(input_csv, db_path, output_file_path=None, raw_output_path=None,
     # Initialise parameters
 
     if output_file_path is None:
-        output_file_path = os.path.join(os.getcwd(), 'output.csv')
+        output_file_path = os.path.join(os.getcwd(), 'matching_output.csv')
 
     if raw_output_path is None:
-        raw_output_path = os.path.join(os.getcwd(), 'raw_output')
+        raw_output_path = os.path.join(os.getcwd(), 'matching_raw_output')
 
     if not os.path.exists(raw_output_path):
         os.mkdir(raw_output_path)
@@ -112,7 +107,7 @@ def match(input_csv, db_path, output_file_path=None, raw_output_path=None,
         max_workers = available_cpu_count()
 
     batch_size_adj = int(batch_size / max_workers) * max_workers
-    total_tasks = buf_count_newlines_gen(input_csv) - 1
+    total_tasks = csv_row_counter(input_csv) - 1
     total_batches = int(total_tasks / batch_size_adj) + int((total_tasks % batch_size_adj) > 0)
 
     # Check and read the input
@@ -165,9 +160,11 @@ def match(input_csv, db_path, output_file_path=None, raw_output_path=None,
 
                 df_batch = next(batch_gen)
 
+                df_batch.dropna(subset=uprn_col)
+
                 address_list = df_batch.input_address.to_list()
 
-                chunk_size = int(batch_size / max_workers)
+                chunk_size = int(batch_size_adj / max_workers) + int((batch_size_adj % max_workers) > 0)
 
                 results = matcher.match_batch(address_list, max_workers=max_workers, chunksize=chunk_size)
 

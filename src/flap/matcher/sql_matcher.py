@@ -61,6 +61,8 @@ Guess multiplier with UPRN information
 
 
 """
+
+
 import os
 
 import pandas as pd
@@ -128,6 +130,10 @@ class SqlMatcher:
 
         for query in self.queries:
             self.sql_db.create_index(table_name='indexed', columns=query)
+            self.sql_db.create_index(table_name='expanded', columns=query)
+
+        self.sql_db.create_index(table_name='indexed', columns=['UPRN'])
+        self.sql_db.create_index(table_name='expanded', columns=['UPRN'])
 
 #         self.t_temp = time.time()  # time
 #         self.t_log = {}  # time
@@ -177,6 +183,54 @@ class SqlMatcher:
         res = self._match_one_record(parsed, uprn_row)
 
         return res['features']
+
+    def _generate_feature_for_concurrent(self, row):
+
+        address, _ = address_line_preproc(row['input_address'])
+
+        parsed = self.parser.parse(address, method='fast')
+
+        res = self._match_one_record(parsed, row)
+
+        return res['features']
+
+    def score_matching_of_batch(self, df_batch, input_address_col='input_address', uprn_col='uprn',
+                                max_workers=None, chunksize=None):
+
+        df_batch['flap_score'] = np.NaN
+
+        df_batch_with_uprn = df_batch[~df_batch[uprn_col].isna()]
+        df_batch_without_uprn = df_batch[df_batch[uprn_col].isna()]
+
+        uprn_list = [s for s in df_batch_with_uprn.uprn.to_list() if isinstance(s, str)]
+
+        res = self.sql_db.sql_query_by_column_values(table_name='indexed', column='UPRN', value_list=uprn_list)
+        columns = self.sql_db.get_columns_of_table(table_name='indexed')
+        res_df = pd.DataFrame.from_records(res, columns=columns)
+
+        merge_df = pd.merge(left=df_batch_with_uprn, right=res_df, how='inner', left_on=uprn_col, right_on='UPRN')
+
+        merge_df_with_uprn = merge_df[~merge_df.UPRN.isna()]
+        merge_df_without_uprn = merge_df[merge_df.UPRN.isna()]
+
+        if max_workers == 1:
+            X = [self.generate_feature(row[input_address_col], row)
+                 for _, row in merge_df_with_uprn.iterrows()]
+
+        else:
+            X = progress_map_tqdm_concurrent(self._generate_feature_for_concurrent,
+                                             (row for _, row in merge_df_with_uprn.iterrows()),
+                                             max_workers=max_workers, chunksize=chunksize)
+
+        self.scorer.estimator.set_params(n_jobs=max_workers)
+
+        scores = self.scorer.score_batch(X)
+
+        # Re-attached the missing values
+
+        merge_df_with_uprn['flap_score'] = scores
+
+        return pd.concat([merge_df_with_uprn, merge_df_without_uprn, df_batch_without_uprn], join='inner')
 
     def match(self, address, max_beam_width=500, score_threshold=0.3, troubleshoot=False):
 
