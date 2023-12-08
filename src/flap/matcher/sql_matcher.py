@@ -149,7 +149,7 @@ class SqlMatcher:
 
         query_string = query_task_to_sql(query_task, table_name)
 
-        res = pd.DataFrame(self.sql_db.sql_query(query_string), columns=self.sql_db.get_columns_of_table('indexed'))
+        res = pd.DataFrame(self.sql_db.sql_query(query_string), columns=self.sql_db.get_columns_of_table(table_name))
 
         return res
 
@@ -197,19 +197,23 @@ class SqlMatcher:
     def score_matching_of_batch(self, df_batch, input_address_col='input_address', uprn_col='uprn',
                                 max_workers=None, chunksize=None):
 
-        df_batch['flap_score'] = np.NaN
+        df_batch['flap_eval_score'] = np.NaN
 
         df_batch_with_uprn = df_batch[~df_batch[uprn_col].isna()]
         df_batch_without_uprn = df_batch[df_batch[uprn_col].isna()]
 
-        uprn_list = [s for s in df_batch_with_uprn.uprn.to_list() if isinstance(s, str)]
+        uprn_list = [s for s in df_batch_with_uprn[uprn_col].to_list() if isinstance(s, str)]
 
         res = self.sql_db.sql_query_by_column_values(table_name='indexed', column='UPRN', value_list=uprn_list)
         columns = self.sql_db.get_columns_of_table(table_name='indexed')
         res_df = pd.DataFrame.from_records(res, columns=columns)
 
-        merge_df = pd.merge(left=df_batch_with_uprn, right=res_df, how='inner', left_on=uprn_col, right_on='UPRN')
-
+        merge_df = pd.merge(left=df_batch_with_uprn, right=res_df, how='left', left_on=uprn_col, right_on='UPRN')
+        
+        if sum(~merge_df.UPRN.isna()) == 0:
+            
+            return df_batch
+        
         merge_df_with_uprn = merge_df[~merge_df.UPRN.isna()]
         merge_df_without_uprn = merge_df[merge_df.UPRN.isna()]
 
@@ -228,7 +232,7 @@ class SqlMatcher:
 
         # Re-attached the missing values
 
-        merge_df_with_uprn['flap_score'] = scores
+        merge_df_with_uprn['flap_eval_score'] = scores
 
         return pd.concat([merge_df_with_uprn, merge_df_without_uprn, df_batch_without_uprn], join='inner')
 

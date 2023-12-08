@@ -156,11 +156,9 @@ def match(input_csv, db_path, output_file_path=None, raw_output_path=None,
 
             batch_path = os.path.join(raw_output_path, batch_name)
 
+            df_batch = next(batch_gen)
+
             if not os.path.exists(batch_path):
-
-                df_batch = next(batch_gen)
-
-                df_batch.dropna(subset=uprn_col)
 
                 address_list = df_batch.input_address.to_list()
 
@@ -179,8 +177,8 @@ def match(input_csv, db_path, output_file_path=None, raw_output_path=None,
 
                     try:
                         record['uprn_row'] = join_uprn_fields(result['uprn_row'])
-                        record['uprn'] = result['uprn_row']['UPRN']
-                        record['score'] = result['score']
+                        record['flap_uprn'] = result['uprn_row']['UPRN']
+                        record['flap_match_score'] = result['score']
 
                     except KeyError:
                         try:
@@ -205,7 +203,7 @@ def match(input_csv, db_path, output_file_path=None, raw_output_path=None,
 
     # Summarising results
 
-    results = _load_all_csv_from_path(raw_output_path)
+    results = _load_all_csv_from_path(raw_output_path, dtype='object')
 
     results.to_csv(output_file_path)
 

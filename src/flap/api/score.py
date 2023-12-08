@@ -26,6 +26,7 @@ def csv_row_counter(filename):
 
 
 def read_csv_header(filename):
+
     with open(filename, 'r') as f:
         dict_reader = csv.DictReader(f)
         headers = dict_reader.fieldnames
@@ -120,20 +121,20 @@ def score(input_csv, db_path, output_file_path=None, raw_output_path=None,
 
             batch_path = os.path.join(raw_output_path, batch_name)
 
-            if not os.path.exists(batch_path):
+            df_batch = next(batch_gen)
 
-                df_batch = next(batch_gen)
+            if (not os.path.exists(batch_path)) and len(df_batch):
 
                 mapper = {input_address_col: 'input_address', uprn_col: 'uprn'}
                 rev_mapper = {'input_address': input_address_col, 'uprn': uprn_col}
-                df_batch.rename(mapper, axis='columns')
+                df_batch.rename(mapper, axis='columns', inplace=True)
 
                 chunk_size = int(batch_size / max_workers) + 1
 
-                res = matcher.score_matching_of_batch(df_batch, input_address_col=input_address_col, uprn_col=uprn_col,
+                res = matcher.score_matching_of_batch(df_batch, input_address_col='input_address', uprn_col='uprn',
                                                       max_workers=max_workers, chunksize=chunk_size)
 
-                res.rename(rev_mapper, axis='columns')
+                res.rename(rev_mapper, axis='columns', inplace=True)
 
                 res.to_csv(batch_path)
 
@@ -143,7 +144,7 @@ def score(input_csv, db_path, output_file_path=None, raw_output_path=None,
             print('Scoring Finished, start summarising results')
             break
 
-    results = _load_all_csv_from_path(raw_output_path)
+    results = _load_all_csv_from_path(raw_output_path, dtype='object')
 
     results.to_csv(output_file_path)
 
