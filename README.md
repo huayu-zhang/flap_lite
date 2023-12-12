@@ -1,3 +1,6 @@
+![PyPI](https://img.shields.io/pypi/v/flap-lite?label=pypi%20package)
+![PyPI - Downloads](https://img.shields.io/pypi/dm/flap-lite)
+
 # FLAP
 
 *FLAP* is an open-source tool for linking free-text addresses to 
