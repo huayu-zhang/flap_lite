@@ -192,6 +192,92 @@ class SqlMatcher:
 
         res = self._match_one_record(parsed, row)
 
+        multi_regex = re.compile(r'(\d)[A-Z](\d+)')
+
+        multi_regex_matches = {k: re.match(multi_regex, v) for k, v in parsed['NUMBER_LIKE'].items()}
+
+        if any([multi_regex_matches[k] is not None for k in multi_regex_matches]):
+
+            alt_address = address
+
+            alt_parsed = parsed.copy()
+
+            number_like = alt_parsed['NUMBER_LIKE']
+
+            level = 1
+            key = 'number_like_0'
+            flat = 1
+
+            list_of_indices = []
+
+            for k, m in multi_regex_matches.items():
+                if m is None:
+                    list_of_indices.append(number_like[k])
+                else:
+                    level = int(m.group(1))
+                    flat = int(m.group(2))
+                    key = k
+                    break
+
+            if level == 1:
+                alt_parsed['NUMBER_LIKE'][key] = str(flat)
+                alt_address = re.sub(pattern=parsed['FOR_QUERY'][key], repl=alt_parsed['NUMBER_LIKE'][key],
+                                     string=alt_address)
+
+                alt_parsed['TEXTUAL'] = strip_number_like(alt_address)
+
+                res_alt = self._match_one_record(alt_parsed, row)
+
+                score = self.scorer.score(res['features'])
+                score_alt = self.scorer.score(res_alt['features'])
+
+                if score >= score_alt:
+                    return res['features']
+                else:
+                    return res_alt['features']
+
+            if len(list_of_indices) == 0:
+                return res['features']
+
+            if self.multiplier_indices is not None:
+
+                max_level = 0
+                max_flat = 0
+
+                try:
+                    index = '--'.join(['-'.join(list_of_indices), parsed['FOR_QUERY']['POSTCODE']])
+
+                    if index in self.multiplier_indices.index:
+                        max_level = self.multiplier_indices.loc[index, 'max_level']
+                        max_flat = self.multiplier_indices.loc[index, 'max_flat']
+
+                except KeyError:
+
+                    pass
+
+                try:
+                    n_tenement = int(row['n_tenement'])
+                except ValueError:
+                    n_tenement = 1
+
+                multiplier, _ = guess_multiplier(max_level, max_flat, n_tenement)
+                alt_number = (level - 1) * multiplier + flat
+                alt_parsed['NUMBER_LIKE'][key] = str(alt_number)
+
+                alt_address = re.sub(pattern=parsed['FOR_QUERY'][key], repl=alt_parsed['NUMBER_LIKE'][key],
+                                     string=alt_address)
+                alt_parsed['TEXTUAL'] = strip_number_like(alt_address)
+
+                res_alt = self._match_one_record(alt_parsed, row)
+
+                score = self.scorer.score(res['features'])
+                score_alt = self.scorer.score(res_alt['features'])
+
+                if score >= score_alt:
+                    return res['features']
+                else:
+                    return res_alt['features']
+
         return res['features']
 
     def score_matching_of_batch(self, df_batch, input_address_col='input_address', uprn_col='uprn',
