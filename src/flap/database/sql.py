@@ -434,6 +434,18 @@ class SqlDB:
 
         con.close()
 
+    def attach_uprn_fields_to_df(self, df, uprn_col='uprn'):
+
+        uprn_list = [s for s in df[uprn_col].to_list() if isinstance(s, str)]
+
+        res = self.sql_query_by_column_values(table_name='indexed', column='UPRN', value_list=uprn_list)
+        columns = self.get_columns_of_table(table_name='indexed')
+        res_df = pd.DataFrame.from_records(res, columns=columns)
+
+        df = pd.merge(left=df, right=res_df, left_on=uprn_col, right_on='UPRN', how='left', suffixes=(None, '_db'))
+
+        return df
+
     def create_index(self, table_name, columns):
 
         index_name = '__'.join(columns)

@@ -162,7 +162,7 @@ def match(input_csv, db_path, output_file_path=None, raw_output_path=None,
 
                 address_list = df_batch.input_address.to_list()
 
-                chunk_size = int(batch_size_adj / max_workers) + int((batch_size_adj % max_workers) > 0)
+                chunk_size = int(batch_size_adj / max_workers / 4) + int((batch_size_adj % max_workers) > 0)
 
                 results = matcher.match_batch(address_list, max_workers=max_workers, chunksize=chunk_size)
 

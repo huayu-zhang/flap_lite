@@ -1,10 +1,14 @@
 import re
 import json
+from tqdm.contrib.concurrent import process_map
+import pandas as pd
 
 from copy import deepcopy
 
 from flap.utils import span_to_string, repl_char_from_string, span_end, flatten
 from flap.database.sql import SqlDB
+from flap.preprocessing import address_line_preproc
+from flap.utils import available_cpu_count
 
 
 class RuleParserFast:
@@ -253,6 +257,37 @@ class RuleParserFast:
             raise ValueError('`method` must be `fast` or `all`')
 
         return parsed
+
+    def parse_one_input_row(self, iterrow):
+
+        _, row = iterrow
+
+        record = row.to_dict()
+
+        try:
+            address, _ = address_line_preproc(row['input_address'])
+
+            record['preproc_address'] = address
+
+            record.update(self.parse(address, method='all')['FOR_QUERY'])
+
+        except:
+            pass
+
+        return record
+
+    def parse_batch_in_df(self, df, max_workers=None, chunk_size=None):
+
+        if max_workers is None:
+            max_workers = available_cpu_count()
+
+        if chunk_size is None:
+            chunk_size = int(len(df) / max_workers) + int((len(df) % max_workers) > 0)
+
+        records = process_map(self.parse_one_input_row, df.iterrows(),
+                              max_workers=max_workers, chunksize=chunk_size, total=len(df))
+
+        return pd.DataFrame.from_records(records)
 
 
 NUMBER_LIKE_MASTER_REGEX = re.compile(

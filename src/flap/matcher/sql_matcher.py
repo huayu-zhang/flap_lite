@@ -300,8 +300,8 @@ class SqlMatcher:
             
             return df_batch
         
-        merge_df_with_uprn = merge_df[~merge_df.UPRN.isna()]
-        merge_df_without_uprn = merge_df[merge_df.UPRN.isna()]
+        merge_df_with_uprn = merge_df[~merge_df.UPRN.isna()].copy()
+        merge_df_without_uprn = merge_df[merge_df.UPRN.isna()].copy()
 
         if max_workers == 1:
             X = [self.generate_feature(row[input_address_col], row)
@@ -318,7 +318,7 @@ class SqlMatcher:
 
         # Re-attached the missing values
 
-        merge_df_with_uprn['flap_eval_score'] = scores
+        merge_df_with_uprn.loc[:, 'flap_eval_score'] = scores
 
         return pd.concat([merge_df_with_uprn, merge_df_without_uprn, df_batch_without_uprn], join='inner')
 
