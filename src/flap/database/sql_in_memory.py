@@ -6,14 +6,54 @@ class SqlDBInMemory:
 
     def __init__(self):
         self.columns_dict = {}
+        self.update_columns_dict()
 
     @staticmethod
     def get_conn():
         return sqlite3.connect('file:cachedb?mode=memory&cache=shared', timeout=10)
 
+    def update_columns_dict(self):
+
+        conn = self.get_conn()
+
+        cur = conn.cursor()
+        cur.execute("""SELECT name FROM sqlite_master WHERE type='table'""")
+
+        tables = [i[0] for i in cur.fetchall()]
+
+        cur.close()
+
+        for table_name in tables:
+
+            cur = conn.cursor()
+
+            cur.execute("""SELECT sql FROM sqlite_master WHERE tbl_name = ? AND type = 'table'""", (table_name,))
+            res = cur.fetchall()
+
+            cur.close()
+
+            try:
+                s = res[0][0]
+                lines = s.split('\n')
+                column_names = [line.split('"')[1] for line in lines[1:-1]]
+
+            except TypeError:
+                column_names = []
+            except IndexError:
+                column_names = []
+
+            self.columns_dict[table_name] = column_names
+
     def load_csv(self, path, table_name, chunksize=10000):
 
+        self.update_columns_dict()
+
+        if table_name in self.columns_dict:
+            print('Use Existing DB in Cache')
+            return
+
         print('Start loading DB to memory')
+
         db_chunks = pd.read_csv(path, chunksize=chunksize, dtype='object', index_col=0)
 
         i = 0
@@ -34,6 +74,7 @@ class SqlDBInMemory:
         print('DB Loading Finished')
 
     def get_columns_of_table(self, table_name):
+        self.update_columns_dict()
         return self.columns_dict[table_name]
 
     def sql_query(self, query):

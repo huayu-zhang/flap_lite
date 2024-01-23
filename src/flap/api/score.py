@@ -100,17 +100,10 @@ def score(input_csv, db_path, output_file_path=None, raw_output_path=None,
 
         assert all([s in csv_names for s in ['indexed', 'expanded']]), 'CSV database does not exist'
 
-        if not os.path.exists('file:cachedb?mode=memory&cache=shared'):
-
-            for table_name, path in zip(csv_names, csv_files):
-                print(f'Loading Table {table_name} in memory')
-                sql_db_in_memory.load_csv(path, table_name)
-                print()
-
-        else:
-            print('Use cached DB at `file:cachedb?mode=memory&cache=shared`')
-            print(sql_db_in_memory.get_columns_of_table('indexed'))
-            print(sql_db_in_memory.get_columns_of_table('expanded'))
+        for table_name, path in zip(csv_names, csv_files):
+            print(f'Loading Table {table_name} in memory')
+            sql_db_in_memory.load_csv(path, table_name)
+            print()
 
         parser = RuleParserFast(sql_db)
 
