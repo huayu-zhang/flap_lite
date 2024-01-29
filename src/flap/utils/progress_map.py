@@ -61,7 +61,7 @@ def _progress_map_tqdm(func, iterable):
     return map_result
 
 
-def progress_map_tqdm_concurrent(func, iterable, length=None, max_workers=None, chunksize=None):
+def progress_map_tqdm_concurrent(func, iterable, length=None, max_workers=None, chunksize=None, **kwargs):
 
     if max_workers is None:
         max_workers = os.cpu_count()
@@ -75,7 +75,7 @@ def progress_map_tqdm_concurrent(func, iterable, length=None, max_workers=None, 
             except TypeError:
                 chunksize = calc_chunksize(max_workers, 5000)
 
-    map_result = process_map(func, iterable, max_workers=max_workers,
+    map_result = process_map(func, iterable, **kwargs, max_workers=max_workers,
                              chunksize=chunksize)
 
     return map_result

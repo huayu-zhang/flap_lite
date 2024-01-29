@@ -128,6 +128,12 @@ class SqlMatcher:
             except FileNotFoundError:
                 pass
 
+        self.match_config = {
+            'max_beam_width': 200,
+            'score_threshold': 0.3,
+            'troubleshoot': False
+        }
+
         for query in self.queries:
             self.sql_db.create_index(table_name='indexed', columns=query)
             self.sql_db.create_index(table_name='expanded', columns=query)
@@ -142,6 +148,10 @@ class SqlMatcher:
 #         # time
 #         self.t_log[checkpoint_name] = time.time() - self.t_temp  # time
 #         self.t_temp = time.time()  # time
+
+    def set_match_config(self, **config):
+        for k, v in config.items():
+            self.match_config[k] = v
 
     def _query(self, query, table_name, parsed):
 
@@ -295,11 +305,11 @@ class SqlMatcher:
         res_df = pd.DataFrame.from_records(res, columns=columns)
 
         merge_df = pd.merge(left=df_batch_with_uprn, right=res_df, how='left', left_on=uprn_col, right_on='UPRN')
-        
+
         if sum(~merge_df.UPRN.isna()) == 0:
-            
+
             return df_batch
-        
+
         merge_df_with_uprn = merge_df[~merge_df.UPRN.isna()].copy()
         merge_df_without_uprn = merge_df[merge_df.UPRN.isna()].copy()
 
@@ -322,21 +332,25 @@ class SqlMatcher:
 
         return pd.concat([merge_df_with_uprn, merge_df_without_uprn, df_batch_without_uprn], join='inner')
 
-    def match(self, address, max_beam_width=500, score_threshold=0.3, troubleshoot=False):
+    def match(self, address):
 
-        #         self.t_temp = time.time()  # time
-        #         self._record_time('start')  # time
+#         self.t_temp = time.time()  # time
+#         self._record_time('start')  # time
 
         address, log = address_line_preproc(address)
 
         if not log['proceed']:
             return {'score': 0}
 
-        #         self._record_time('preproc')  # time
+        max_beam_width = self.match_config['max_beam_width']
+        score_threshold = self.match_config['score_threshold']
+        troubleshoot = self.match_config['troubleshoot']
+
+#         self._record_time('preproc')  # time
 
         parsed = self.parser.parse(address, method='fast')
 
-        #         self._record_time('fast_parse')  # time
+#         self._record_time('fast_parse')  # time
 
         current_bw = 0
 
@@ -460,9 +474,9 @@ class SqlMatcher:
                 try:
                     if self.scorer is not None:
                         X = [res['features'] for res in results]
-                        #                     t0 = time.time() # time
+#                         t0 = time.time() # time
                         scores = self.scorer.score_batch(X)
-                        #                     self.t_log['scorer'] = time.time() - t0 # time
+#                         self.t_log['scorer'] = time.time() - t0 # time
 
                         for res, score in zip(results, scores):
                             res['score'] = score
@@ -477,6 +491,8 @@ class SqlMatcher:
                 except ValueError:
                     pass
 
+#                 print(current_bw) # time
+
                 if current_bw > max_beam_width:
                     stop_loop = True
 
@@ -490,8 +506,8 @@ class SqlMatcher:
 
         # End the main loop
 
-        #         self._record_time('main_loop')  # time
-        #         self.t_log['beam_width'] = current_bw  # time
+#         self._record_time('main_loop')  # time
+#         self.t_log['beam_width'] = current_bw  # time
 
         if best_res is None:
             best_res = {'score': 0}
@@ -501,10 +517,10 @@ class SqlMatcher:
         else:
             return best_res
 
-    def _match_safe(self, address, max_beam_width=500, score_threshold=0.3, troubleshoot=False):
+    def _match_safe(self, address):
 
         try:
-            return self.match(address, max_beam_width, score_threshold, troubleshoot)
+            return self.match(address)
 
         except:
             try:
@@ -512,7 +528,8 @@ class SqlMatcher:
             except:
                 return {'score': 0, 'error': traceback.format_exc()}
 
-    def match_batch(self, list_of_addresses, max_workers=None, chunksize=None):
+    def match_batch(self, list_of_addresses,
+                    max_workers=None, chunksize=None):
 
         results = progress_map_tqdm_concurrent(self._match_safe, list_of_addresses,
                                                max_workers=max_workers, chunksize=chunksize)

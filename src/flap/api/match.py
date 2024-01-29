@@ -52,7 +52,8 @@ def _check_index(csv_file):
 
 
 def match(input_csv, db_path, output_file_path=None, raw_output_path=None,
-          batch_size=10000, max_workers=None, in_memory_db=False, classifier_model_path=None):
+          batch_size=10000, max_workers=None, in_memory_db=False, classifier_model_path=None,
+          max_beam_width=200, score_threshold=0.3):
     """
     This is the top level function for matching free-text addresses from a csv file to the OS ABP UPRN database.
 
@@ -143,6 +144,8 @@ def match(input_csv, db_path, output_file_path=None, raw_output_path=None,
         parser = RuleParserFast(sql_db)
 
         matcher = SqlMatcher(sql_db_in_memory, parser=parser, scorer_path=classifier_model_path)
+
+    matcher.set_match_config(max_beam_width=max_beam_width, score_threshold=score_threshold)
 
     # Main matching loop
 
