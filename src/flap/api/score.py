@@ -54,34 +54,62 @@ def _check_index(csv_file):
     return header_0 == ''
 
 
+def generate_chunks_of_dataframe(df, chunk_size):
+
+    i = 0
+
+    while (i + chunk_size) < len(df):
+
+        yield df.iloc[i:(i + chunk_size)]
+
+        i += chunk_size
+
+    yield df.iloc[i:]
+
+
 def score(input_csv, db_path, output_file_path=None, raw_output_path=None,
           batch_size=10000, max_workers=None, in_memory_db=False, classifier_model_path=None,
           input_address_col='input_address', uprn_col='uprn'):
 
     # Initialise parameters
 
-    if output_file_path is None:
-        output_file_path = os.path.join(os.getcwd(), 'scoring_output.csv')
+    # if output_file_path is None:
+    #     output_file_path = os.path.join(os.getcwd(), 'scoring_output.csv')
 
-    if raw_output_path is None:
+    if raw_output_path is not None:
+
         raw_output_path = os.path.join(os.getcwd(), 'scoring_raw_output')
 
-    if not os.path.exists(raw_output_path):
-        os.mkdir(raw_output_path)
+        if not os.path.exists(raw_output_path):
+            os.mkdir(raw_output_path)
 
     if max_workers is None:
         max_workers = available_cpu_count()
 
-    batch_size_adj = int(batch_size / max_workers) * max_workers
-    total_tasks = csv_row_counter(input_csv) - 1
-    total_batches = int(total_tasks / batch_size_adj) + int((total_tasks % batch_size_adj) > 0)
-
     # Check and read the input
 
-    headers = read_csv_header(input_csv)
-    assert all(s in headers for s in [input_address_col, uprn_col]), \
-        f'Two columns are required in input csv file: `{input_address_col}` and `{uprn_col}`'
-    batch_gen = pd.read_csv(input_csv, dtype='object', chunksize=batch_size_adj, index_col=0)
+    if isinstance(input_csv, str):
+        batch_size_adj = int(batch_size / max_workers) * max_workers
+        total_tasks = csv_row_counter(input_csv) - 1
+        total_batches = int(total_tasks / batch_size_adj) + int((total_tasks % batch_size_adj) > 0)
+
+        headers = read_csv_header(input_csv)
+        assert all(s in headers for s in ['input_id', 'input_address']), \
+            'Two columns are required in input csv file: `input_id` and `input_address`'
+        batch_gen = pd.read_csv(input_csv, dtype='object', chunksize=batch_size_adj, index_col=0)
+
+    elif isinstance(input_csv, pd.DataFrame):
+        batch_size_adj = int(batch_size / max_workers) * max_workers
+        total_tasks = len(input_csv)
+        total_batches = int(total_tasks / batch_size_adj) + int((total_tasks % batch_size_adj) > 0)
+
+        headers = input_csv.columns
+        assert all(s in headers for s in ['input_id', 'input_address']), \
+            'Two columns are required in input csv file: `input_id` and `input_address`'
+        batch_gen = generate_chunks_of_dataframe(input_csv, chunk_size=batch_size_adj)
+
+    else:
+        raise TypeError('input_csv should be path(str) or pd.DataFrame')
 
     # Check the database
     if not in_memory_db:
@@ -109,9 +137,11 @@ def score(input_csv, db_path, output_file_path=None, raw_output_path=None,
 
         matcher = SqlMatcher(sql_db_in_memory, parser=parser, scorer_path=classifier_model_path)
 
-    # Main matching loop
+    # Main scoring loop
 
     batch_index = 0
+
+    res_collection = []
 
     while True:
 
@@ -119,11 +149,15 @@ def score(input_csv, db_path, output_file_path=None, raw_output_path=None,
             batch_name = 'batch_%s.csv' % batch_index
             print('Processing %s out of %s' % (batch_name, total_batches))
 
-            batch_path = os.path.join(raw_output_path, batch_name)
+            batch_exists = False
 
-            df_batch = next(batch_gen)
+            if raw_output_path is not None:
+                batch_path = os.path.join(raw_output_path, batch_name)
+                batch_exists = os.path.exists(batch_path)
 
-            if (not os.path.exists(batch_path)) and len(df_batch):
+            df_batch = next(batch_gen).copy()
+
+            if (not batch_exists) and len(df_batch):
 
                 mapper = {input_address_col: 'input_address', uprn_col: 'uprn'}
                 rev_mapper = {'input_address': input_address_col, 'uprn': uprn_col}
@@ -136,7 +170,11 @@ def score(input_csv, db_path, output_file_path=None, raw_output_path=None,
 
                 res.rename(rev_mapper, axis='columns', inplace=True)
 
-                res.to_csv(batch_path)
+                if raw_output_path is not None:
+                    batch_path = os.path.join(raw_output_path, batch_name)
+                    res.to_csv(batch_path)
+                else:
+                    res_collection.append(res.copy())
 
             batch_index += 1
 
@@ -144,10 +182,13 @@ def score(input_csv, db_path, output_file_path=None, raw_output_path=None,
             print('Scoring Finished, start summarising results')
             break
 
-    results = _load_all_csv_from_path(raw_output_path, dtype='object')
+    if raw_output_path is not None:
+        results = _load_all_csv_from_path(raw_output_path, dtype='object')
+    else:
+        results = pd.concat(res_collection)
 
-    results.to_csv(output_file_path)
-
-    print('Results can be see at: %s' % output_file_path)
+    if output_file_path is not None:
+        results.to_csv(output_file_path)
+        print('Results can be see at: %s' % output_file_path)
 
     return results

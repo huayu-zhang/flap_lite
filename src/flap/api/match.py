@@ -51,6 +51,19 @@ def _check_index(csv_file):
     return header_0 == ''
 
 
+def generate_chunks_of_dataframe(df, chunk_size):
+
+    i = 0
+
+    while (i + chunk_size) < len(df):
+
+        yield df.iloc[i:(i + chunk_size)]
+
+        i += chunk_size
+
+    yield df.iloc[i:]
+
+
 def match(input_csv, db_path, output_file_path=None, raw_output_path=None,
           batch_size=10000, max_workers=None, in_memory_db=False, classifier_model_path=None,
           max_beam_width=200, score_threshold=0.3):
@@ -77,7 +90,10 @@ def match(input_csv, db_path, output_file_path=None, raw_output_path=None,
         csv files
     classifier_model_path : str, default None
         The path to the pretrained sklearn classifier model. If None, the model is loaded from 'flap.__file__/*.clf'
-
+    max_beam_width: int, default 200
+        The max number of rows to be considered from UPRN database
+    score_threshold: float, default 0.3
+        The min score for early stop of matching
     Returns
     -------
     pandas.DataFrame
@@ -95,28 +111,43 @@ def match(input_csv, db_path, output_file_path=None, raw_output_path=None,
     """
     # Initialise parameters
 
-    if output_file_path is None:
-        output_file_path = os.path.join(os.getcwd(), 'matching_output.csv')
+    # if output_file_path is None:
+    #     output_file_path = os.path.join(os.getcwd(), 'matching_output.csv')
 
-    if raw_output_path is None:
-        raw_output_path = os.path.join(os.getcwd(), 'matching_raw_output')
+    if raw_output_path is not None:
 
-    if not os.path.exists(raw_output_path):
-        os.mkdir(raw_output_path)
+        raw_output_path = os.path.join(os.getcwd(), 'scoring_raw_output')
+
+        if not os.path.exists(raw_output_path):
+            os.mkdir(raw_output_path)
 
     if max_workers is None:
         max_workers = available_cpu_count()
 
-    batch_size_adj = int(batch_size / max_workers) * max_workers
-    total_tasks = csv_row_counter(input_csv) - 1
-    total_batches = int(total_tasks / batch_size_adj) + int((total_tasks % batch_size_adj) > 0)
-
     # Check and read the input
 
-    headers = read_csv_header(input_csv)
-    assert all(s in headers for s in ['input_id', 'input_address']), \
-        'Two columns are required in input csv file: `input_id` and `input_address`'
-    batch_gen = pd.read_csv(input_csv, dtype='object', chunksize=batch_size_adj, index_col=0)
+    if isinstance(input_csv, str):
+        batch_size_adj = int(batch_size / max_workers) * max_workers
+        total_tasks = csv_row_counter(input_csv) - 1
+        total_batches = int(total_tasks / batch_size_adj) + int((total_tasks % batch_size_adj) > 0)
+
+        headers = read_csv_header(input_csv)
+        assert all(s in headers for s in ['input_id', 'input_address']), \
+            'Two columns are required in input csv file: `input_id` and `input_address`'
+        batch_gen = pd.read_csv(input_csv, dtype='object', chunksize=batch_size_adj, index_col=0)
+
+    elif isinstance(input_csv, pd.DataFrame):
+        batch_size_adj = int(batch_size / max_workers) * max_workers
+        total_tasks = len(input_csv)
+        total_batches = int(total_tasks / batch_size_adj) + int((total_tasks % batch_size_adj) > 0)
+
+        headers = input_csv.columns
+        assert all(s in headers for s in ['input_id', 'input_address']), \
+            'Two columns are required in input csv file: `input_id` and `input_address`'
+        batch_gen = generate_chunks_of_dataframe(input_csv, chunk_size=batch_size_adj)
+
+    else:
+        raise TypeError('input_csv should be path(str) or pd.DataFrame')
 
     # Check the database
     if not in_memory_db:
@@ -151,17 +182,24 @@ def match(input_csv, db_path, output_file_path=None, raw_output_path=None,
 
     batch_index = 0
 
+    res_collection = []
+
     while True:
 
         try:
             batch_name = 'batch_%s.csv' % batch_index
             print('Processing %s out of %s' % (batch_name, total_batches))
 
-            batch_path = os.path.join(raw_output_path, batch_name)
 
-            df_batch = next(batch_gen)
+            batch_exists = False
 
-            if not os.path.exists(batch_path):
+            if raw_output_path is not None:
+                batch_path = os.path.join(raw_output_path, batch_name)
+                batch_exists = os.path.exists(batch_path)
+
+            df_batch = next(batch_gen).copy()
+
+            if (not batch_exists) and len(df_batch):
 
                 address_list = df_batch.input_address.to_list()
 
@@ -196,7 +234,11 @@ def match(input_csv, db_path, output_file_path=None, raw_output_path=None,
 
                 records_df = pd.DataFrame.from_records(records)
 
-                records_df.to_csv(batch_path)
+                if raw_output_path is not None:
+                    batch_path = os.path.join(raw_output_path, batch_name)
+                    records_df.to_csv(batch_path)
+                else:
+                    res_collection.append(records_df.copy())
 
             batch_index += 1
 
@@ -206,10 +248,13 @@ def match(input_csv, db_path, output_file_path=None, raw_output_path=None,
 
     # Summarising results
 
-    results = _load_all_csv_from_path(raw_output_path, dtype='object')
+    if raw_output_path is not None:
+        results = _load_all_csv_from_path(raw_output_path, dtype='object')
+    else:
+        results = pd.concat(res_collection)
 
-    results.to_csv(output_file_path)
-
-    print('Results can be see at: %s' % output_file_path)
+    if output_file_path is not None:
+        results.to_csv(output_file_path)
+        print('Results can be see at: %s' % output_file_path)
 
     return results
