@@ -116,8 +116,6 @@ def match(input_csv, db_path, output_file_path=None, raw_output_path=None,
 
     if raw_output_path is not None:
 
-        raw_output_path = os.path.join(os.getcwd(), 'scoring_raw_output')
-
         if not os.path.exists(raw_output_path):
             os.mkdir(raw_output_path)
 
@@ -127,8 +125,9 @@ def match(input_csv, db_path, output_file_path=None, raw_output_path=None,
     # Check and read the input
 
     if isinstance(input_csv, str):
-        batch_size_adj = int(batch_size / max_workers) * max_workers
         total_tasks = csv_row_counter(input_csv) - 1
+        batch_size = min(batch_size, total_tasks)
+        batch_size_adj = int(batch_size / max_workers) * max_workers + max_workers
         total_batches = int(total_tasks / batch_size_adj) + int((total_tasks % batch_size_adj) > 0)
 
         headers = read_csv_header(input_csv)
@@ -137,8 +136,9 @@ def match(input_csv, db_path, output_file_path=None, raw_output_path=None,
         batch_gen = pd.read_csv(input_csv, dtype='object', chunksize=batch_size_adj, index_col=0)
 
     elif isinstance(input_csv, pd.DataFrame):
-        batch_size_adj = int(batch_size / max_workers) * max_workers
         total_tasks = len(input_csv)
+        batch_size = min(batch_size, total_tasks)
+        batch_size_adj = int(batch_size / max_workers) * max_workers + max_workers
         total_batches = int(total_tasks / batch_size_adj) + int((total_tasks % batch_size_adj) > 0)
 
         headers = input_csv.columns
@@ -188,18 +188,20 @@ def match(input_csv, db_path, output_file_path=None, raw_output_path=None,
 
         try:
             batch_name = 'batch_%s.csv' % batch_index
-            print('Processing %s out of %s' % (batch_name, total_batches))
-
 
             batch_exists = False
 
             if raw_output_path is not None:
+
                 batch_path = os.path.join(raw_output_path, batch_name)
+                print(batch_path)
                 batch_exists = os.path.exists(batch_path)
 
             df_batch = next(batch_gen).copy()
 
-            if (not batch_exists) and len(df_batch):
+            print('Processing %s out of (%s/%s)' % (batch_name, batch_index + 1, total_batches))
+
+            if (not batch_exists) and (len(df_batch) > 0):
 
                 address_list = df_batch.input_address.to_list()
 
