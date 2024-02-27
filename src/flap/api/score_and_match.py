@@ -9,6 +9,7 @@ def score_and_match(input_csv, db_path, final_output=None,
                     input_address_col='input_address', uprn_col='uprn',
                     score_output=None, score_output_raw=None, score_batch_size=100000,
                     match_output=None, match_output_raw=None, match_batch_size=10000,
+                    match_in_progress_log_path=None, match_max_log_interval=4800,
                     max_beam_width=200, score_threshold=0.3):
 
     scored = score(input_csv, db_path, output_file_path=score_output, raw_output_path=score_output_raw,
@@ -28,6 +29,7 @@ def score_and_match(input_csv, db_path, final_output=None,
 
     matched = match(input_csv=scored_to_flap, db_path=db_path, output_file_path=match_output,
                     raw_output_path=match_output_raw,
+                    in_progress_log_path=match_in_progress_log_path, max_log_interval=match_max_log_interval,
                     batch_size=match_batch_size, max_workers=max_workers, in_memory_db=in_memory_db,
                     classifier_model_path=classifier_model_path,
                     max_beam_width=max_beam_width, score_threshold=score_threshold
