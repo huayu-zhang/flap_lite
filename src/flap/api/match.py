@@ -4,6 +4,7 @@ Top level API for address matching
 
 import csv
 import os
+import time
 
 import pandas as pd
 import traceback
@@ -65,6 +66,7 @@ def generate_chunks_of_dataframe(df, chunk_size):
 
 
 def match(input_csv, db_path, output_file_path=None, raw_output_path=None,
+          in_progress_log_path=None, max_log_interval=4800,
           batch_size=10000, max_workers=None, in_memory_db=False, classifier_model_path=None,
           max_beam_width=200, score_threshold=0.3):
     """
@@ -81,6 +83,10 @@ def match(input_csv, db_path, output_file_path=None, raw_output_path=None,
         is saved to '[$pwd]/output.csv'
     raw_output_path : str, default None
         Path for save the batched raw output files. If None, raw output is saved to '[$pwd]/output_raw/'
+    in_progress_log_path: str, default None
+        Path for files indicating one batch is being processed
+    max_log_interval: str, default 4800
+        The interval under which the programme thinks some process is actively working on it
     batch_size : int, default 10000
         Size of each batch
     max_workers : int, default None
@@ -118,6 +124,11 @@ def match(input_csv, db_path, output_file_path=None, raw_output_path=None,
 
         if not os.path.exists(raw_output_path):
             os.mkdir(raw_output_path)
+
+    if in_progress_log_path is not None:
+
+        if not os.path.exists(in_progress_log_path):
+            os.mkdir(in_progress_log_path)
 
     if max_workers is None:
         max_workers = available_cpu_count()
@@ -191,17 +202,42 @@ def match(input_csv, db_path, output_file_path=None, raw_output_path=None,
 
             batch_exists = False
 
+            batch_in_progress = False
+
             if raw_output_path is not None:
 
                 batch_path = os.path.join(raw_output_path, batch_name)
-                print(batch_path)
                 batch_exists = os.path.exists(batch_path)
+
+            if in_progress_log_path is not None:
+
+                log_path = os.path.join(in_progress_log_path, batch_name)
+                log_exists = os.path.exists(log_path)
+
+                if not log_exists:
+
+                    with open(log_path, 'w') as f:
+                        f.write('%s' % time.time())
+
+                else:
+
+                    with open(log_path, 'r') as f:
+                        log_time = float(f.read())
+
+                    if (time.time() - log_time) > max_log_interval:
+
+                        with open(log_path, 'w') as f:
+                            f.write('%s' % time.time())
+
+                    else:
+
+                        batch_in_progress = True
 
             df_batch = next(batch_gen).copy()
 
             print('Processing %s out of (%s/%s)' % (batch_name, batch_index + 1, total_batches))
 
-            if (not batch_exists) and (len(df_batch) > 0):
+            if (not batch_exists) and (not batch_in_progress) and (len(df_batch) > 0):
 
                 address_list = df_batch.input_address.to_list()
 

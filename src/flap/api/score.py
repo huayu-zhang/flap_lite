@@ -68,6 +68,7 @@ def generate_chunks_of_dataframe(df, chunk_size):
 
 
 def score(input_csv, db_path, output_file_path=None, raw_output_path=None,
+          in_progress_log_path=None, max_log_interval=4800,
           batch_size=10000, max_workers=None, in_memory_db=False, classifier_model_path=None,
           input_address_col='input_address', uprn_col='uprn'):
 
@@ -80,6 +81,11 @@ def score(input_csv, db_path, output_file_path=None, raw_output_path=None,
 
         if not os.path.exists(raw_output_path):
             os.mkdir(raw_output_path)
+
+    if in_progress_log_path is not None:
+
+        if not os.path.exists(in_progress_log_path):
+            os.mkdir(in_progress_log_path)
 
     if max_workers is None:
         max_workers = available_cpu_count()
@@ -150,15 +156,41 @@ def score(input_csv, db_path, output_file_path=None, raw_output_path=None,
 
             batch_exists = False
 
+            batch_in_progress = False
+
             if raw_output_path is not None:
                 batch_path = os.path.join(raw_output_path, batch_name)
                 batch_exists = os.path.exists(batch_path)
+
+            if in_progress_log_path is not None:
+
+                log_path = os.path.join(in_progress_log_path, batch_name)
+                log_exists = os.path.exists(log_path)
+
+                if not log_exists:
+
+                    with open(log_path, 'w') as f:
+                        f.write('%s' % time.time())
+
+                else:
+
+                    with open(log_path, 'r') as f:
+                        log_time = float(f.read())
+
+                    if (time.time() - log_time) > max_log_interval:
+
+                        with open(log_path, 'w') as f:
+                            f.write('%s' % time.time())
+
+                    else:
+
+                        batch_in_progress = True
 
             df_batch = next(batch_gen).copy()
 
             print('Processing %s out of (%s/%s)' % (batch_name, batch_index + 1, total_batches))
 
-            if (not batch_exists) and len(df_batch):
+            if (not batch_exists) and (not batch_in_progress) and (len(df_batch) > 0):
 
                 mapper = {input_address_col: 'input_address', uprn_col: 'uprn'}
                 rev_mapper = {'input_address': input_address_col, 'uprn': uprn_col}
