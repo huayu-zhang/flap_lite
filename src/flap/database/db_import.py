@@ -78,6 +78,7 @@ def db_import(sql_db):
             print('Raw table building finished')
 
         elif any('.zip' in zz_file for zz_file in zz_files):
+
             print('.zip database found. Starting to read db file')
 
             chunk_size = int(1e5)
@@ -113,6 +114,25 @@ def db_import(sql_db):
 
             df = pd.DataFrame.from_records(rows, columns=list(sql_config.keys()))
             df.to_sql(name='raw', con=conn, if_exists='append', dtype=sql_config, index=False)
+            print('Raw table building finished')
+
+        elif any('.csv' in zz_file for zz_file in zz_files):
+
+            print('.csv database found. Starting to read db file')
+
+            csv_files = [zz_file for zz_file in zz_files if '.csv' in zz_file]
+
+            sql_config = sql_db.get_db_config()
+
+            for file in csv_files:
+                with z.open(file) as f_csv:
+
+                    print('Processing %s' % file)
+
+                    df = pd.read_csv(f_csv, header=None, dtype='object', names=list(sql_config.keys()))
+
+                    df.to_sql(name='raw', con=conn, if_exists='append', dtype='TEXT', index=False)
+
             print('Raw table building finished')
 
         else:
