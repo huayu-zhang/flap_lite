@@ -39,7 +39,7 @@ class SqlDBManager:
         db_name = os.path.basename(path)
 
         if os.path.exists(new_db_path):
-            warn('DB:%s exists, new database cannot be created.' % db_name)
+            print('DB:%s exists, the existing database is used.' % db_name)
         else:
             os.makedirs(new_db_path, exist_ok=True)
             print('New db created at: %s' % new_db_path)

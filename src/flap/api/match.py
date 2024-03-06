@@ -74,15 +74,15 @@ def match(input_csv, db_path, output_file_path=None, raw_output_path=None,
 
     Parameters
     ----------
-    input_csv : str
+    input_csv : str, or pandas.DataFrame
         Path to the csv file. The file needs to have two fields in the header ['input_id', 'input_address']
     db_path : str
-        Path to the database built. See `flap.create_db()`
+        Path to the database built. See `flap.create_db`
     output_file_path : str, default None
         Path for saving the output csv file, containing ['input_id', 'input_address', 'uprn', 'score']. If None, results
-        is saved to '[$pwd]/output.csv'
+        are not saved
     raw_output_path : str, default None
-        Path for save the batched raw output files. If None, raw output is saved to '[$pwd]/output_raw/'
+        Path for save the batched raw output files. If None, results are not saved
     in_progress_log_path: str, default None
         Path for files indicating one batch is being processed
     max_log_interval: str, default 4800
@@ -95,7 +95,8 @@ def match(input_csv, db_path, output_file_path=None, raw_output_path=None,
         If in-memory SQLite database is used. If True, a temp database is created in shared memory cache from pre-built
         csv files
     classifier_model_path : str, default None
-        The path to the pretrained sklearn classifier model. If None, the model is loaded from 'flap.__file__/*.clf'
+        The path to the pretrained sklearn classifier model.
+        If None, the model is loaded from 'flap.__file__/model/*.clf'
     max_beam_width: int, default 200
         The max number of rows to be considered from UPRN database
     score_threshold: float, default 0.3

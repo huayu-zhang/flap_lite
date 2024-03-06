@@ -72,6 +72,42 @@ def score(input_csv, db_path, output_file_path=None, raw_output_path=None,
           batch_size=10000, max_workers=None, in_memory_db=False, classifier_model_path=None,
           input_address_col='input_address', uprn_col='uprn'):
 
+    """
+    This is the top level function for scoring existing matches of free-text addresses to the OS ABP UPRN database.
+
+    Parameters
+    ----------
+    input_csv : str, or pandas.DataFrame
+        Path to the csv file. The file needs to have two fields in the header ['input_id', 'input_address']
+    db_path : str
+        Path to the database built. See `flap.create_db()`
+    output_file_path : str, default None
+        Path for saving the output csv file, containing ['input_id', 'input_address', 'uprn', 'score']. If None, results
+        are not saved
+    raw_output_path : str, default None
+        Path for save the batched raw output files. If None, results are not saved    in_progress_log_path
+    max_log_interval: str, default 4800
+        The interval under which the programme thinks some process is actively working on it
+    batch_size : int, default 10000
+        Size of each batch
+    max_workers : int, default None
+        Number of processes. If None, the max cpu available is determined by `flap.utils.cpu_count.available_cpu_count()`
+    in_memory_db : bool, default False
+        If in-memory SQLite database is used. If True, a temp database is created in shared memory cache from pre-built
+        csv files
+    classifier_model_path : str, default None
+        The path to the pretrained sklearn classifier model.
+        If None, the model is loaded from 'flap.__file__/model/*.clf'
+    input_address_col: str, default 'input_address'
+        The column name for input addresses
+    uprn_col: str, default 'uprn'
+        The column name for input UPRN
+    Returns
+    -------
+    pandas.DataFrame
+        Score results
+    """
+    
     # Initialise parameters
 
     # if output_file_path is None:

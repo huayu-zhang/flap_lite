@@ -28,7 +28,7 @@ def create_database(db_path, raw_db_file):
     Examples
     --------
     >>> from flap import create_database
-    >>> create_database([db_path], [raw_db_file])
+    >>> create_database(<db_path>, <raw_db_file>)
     """
 
     dm = SqlDBManager()

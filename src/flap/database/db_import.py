@@ -45,13 +45,32 @@ def convert_df_to_object(df):
 
 
 def db_import(sql_db):
-
-    zip_path = [os.path.join(sql_db.sub_paths['raw'], file)
-                for file in os.listdir(sql_db.sub_paths['raw']) if '.zip' in file][0]
-
+    
     sql_db.drop_table('raw')
 
     conn = sql_db.get_conn()
+
+    files_in_raw = [os.path.join(sql_db.sub_paths['raw'], file)
+                    for file in os.listdir(sql_db.sub_paths['raw'])]
+
+    assert len(files_in_raw) == 1, 'There should be only one raw DB file in the raw folder'
+
+    raw_file = files_in_raw[0]
+
+    assert ('.csv' in raw_file) or ('.zip' in raw_file), 'Raw DB file should be either a .csv file or a .zip file'
+
+    if '.csv' in raw_file:
+
+        raw = pd.read_csv(raw_file, chunksize=int(1e5), dtype='object', index_col=0)
+
+        for df_chunk in tqdm(raw):
+            df_chunk.fillna('', inplace=True)
+            df_chunk.to_sql(name='raw', con=conn, if_exists='append', dtype='TEXT', index=False)
+
+        return
+
+    zip_path = [os.path.join(sql_db.sub_paths['raw'], file)
+                for file in os.listdir(sql_db.sub_paths['raw']) if '.zip' in file][0]
 
     with ZipFile(zip_path, 'r') as z:
 
@@ -136,6 +155,6 @@ def db_import(sql_db):
             print('Raw table building finished')
 
         else:
-            pass
+            raise 'Format of the raw file is not recognised.'
 
     conn.close()
