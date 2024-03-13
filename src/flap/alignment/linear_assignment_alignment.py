@@ -1,3 +1,13 @@
+"""
+Linear assignment alignment is the alignment based on the linear assignment optimization.
+
+Please check https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.linear_sum_assignment.html
+and https://en.wikipedia.org/wiki/Assignment_problem
+
+For any two given sequences, the character level dist matrix is generated. The distance is binary, 1 if same character
+else 0. Bonuses are applied if consecutive characters are aligned or entire token in the sequence were aligned.
+"""
+
 from scipy.spatial.distance import cdist
 from scipy.optimize import linear_sum_assignment
 
@@ -8,16 +18,54 @@ from flap.utils import Span
 
 
 def string_to_2d_array(s):
+    """
+    Convert a string to a 2d array for scipy.cdist function.
+
+    Parameters
+    ----------
+    s : str
+        The input sequence
+    Returns
+    -------
+        numpy.ndarray Reshaped 2d array
+    """
     return np.array(list(s)).reshape(-1, 1)
 
 
-def bin_dist(x, y):
+def bin_dist(x: str, y: str):
+    """
+
+    Parameters
+    ----------
+    x : str
+        Input Character or String
+    y : str
+        Input Character or String
+        
+    Returns
+    -------
+    bool
+        If x equals y
+    """
     return int(x == y)
 
 
 class LinearAssignmentAlignment:
 
+    """
+    The class for linear assignment alignment
+    """
+
     def __init__(self, seq1, seq2):
+        """
+
+        Parameters
+        ----------
+        seq1 : str
+            Input string
+        seq2 : str or dict
+            Input string or dict of strings
+        """
         self.seq1 = seq1
 
         self.seq2_index = {}
@@ -41,6 +89,23 @@ class LinearAssignmentAlignment:
         self.diag_paths = None
 
     def _prepare_cost_matrix(self, diag_bonus=True, token_bonus=True):
+        """
+        Internal method for calculating the cost matrix for linear assignment
+
+        Bonuses are added accordingly:
+            if `diag_bonus` is True, add bonus all consecutive diagonal none-zero cost, corresponding to consecutive
+            alignments
+            if 'token_bonus' is True, add bonus to entire token alignments
+
+        Parameters
+        ----------
+        diag_bonus : bool, default True
+        token_bonus : bool, default True
+
+        Returns
+        -------
+
+        """
         a1 = string_to_2d_array(self.seq1)
         a2 = string_to_2d_array(self.seq2)
 
@@ -53,6 +118,13 @@ class LinearAssignmentAlignment:
             self._apply_token_bonus()
 
     def _find_diag_paths(self):
+        """
+        Scan the cost matrix for diagonal paths
+
+        Returns
+        -------
+
+        """
         x_map = self.cost_matrix.copy()
 
         paths = []
@@ -89,7 +161,13 @@ class LinearAssignmentAlignment:
         self.diag_paths = paths
 
     def _apply_diag_bonus(self):
+        """
+        Apply diagonal bonus
 
+        Returns
+        -------
+
+        """
         if self.diag_paths is None:
             self._find_diag_paths()
 
@@ -105,7 +183,16 @@ class LinearAssignmentAlignment:
                 j += 1
 
     def _apply_token_bonus(self, tokenizer=tokenize_default):
+        """
+        Apply token bonus
+        Parameters
+        ----------
+        tokenizer
 
+        Returns
+        -------
+
+        """
         if self.diag_paths is None:
             self._find_diag_paths()
 

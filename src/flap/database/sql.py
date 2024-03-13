@@ -1,3 +1,9 @@
+"""
+The flap.database.sql module contains classes handling creating, connecting and querying SQL database.
+
+SQL database is used for FLAP for its ability to handle large database and to do fast querying via reverse indexing.
+"""
+
 import pandas as pd
 import json
 import os
@@ -95,8 +101,16 @@ class SqlDBManager:
 
 
 class SqlDB:
-
+    """
+    SqlDB class has the methods for creating, indexing, querying of SqlDB
+    """
     def __init__(self, path_to_db):
+        """
+        Parameters
+        ----------
+        path_to_db : str,
+            The path for creating the SQL database
+        """
         self.db_path = path_to_db
         self.db_name = os.path.basename(self.db_path)
         self.sub_paths = {
@@ -125,7 +139,14 @@ class SqlDB:
         return self_str
 
     def get_table_names(self):
+        """
+        Get names of all tables in the database
 
+        Returns
+        -------
+        list
+            Names of all tables in the database
+        """
         conn = self.get_conn()
         cur = conn.cursor()
 
@@ -147,7 +168,17 @@ class SqlDB:
         return table_names
 
     def get_columns_of_table(self, table_name):
-
+        """
+        Method to get columns of a table in the database
+        Parameters
+        ----------
+        table_name : str
+            The name of the table to be queried
+        Returns
+        -------
+        list
+            The column names of the table
+        """
         table_name = (table_name,)
 
         conn = self.get_conn()
@@ -173,6 +204,12 @@ class SqlDB:
 
     @property
     def db_status(self):
+        """
+        Print the status of the database
+        Returns
+        -------
+        None
+        """
         db_status = {
             'db_name': self.db_name,
             'db_path': self.db_path,
@@ -190,6 +227,16 @@ class SqlDB:
         return self.__db_status
 
     def drop_table(self, table):
+        """
+        Drop a table from the database
+        Parameters
+        ----------
+        table : str
+            Name of the table to be dropped
+        Returns
+        -------
+        None
+        """
         conn = self.get_conn()
         cur = conn.cursor()
 
@@ -204,7 +251,12 @@ class SqlDB:
         conn.close()
 
     def get_db_config(self):
-
+        """
+        Get config of the database.
+        Config can be set via `.json` file in `./db_config/*.json` otherwise default will be returned
+        Returns
+        -------
+        """
         sql_config_path = [os.path.join(self.sub_paths['db_config'], file)
                            for file in os.listdir(self.sub_paths['db_config']) if '.json' in file]
 
@@ -258,6 +310,16 @@ class SqlDB:
         return sql_config
 
     def setup_database(self, if_exists='skip'):
+        """
+        The wrapper for the whole setup process
+        Parameters
+        ----------
+        if_exists : 'skip' or 'replace'
+            if 'skip' raw and indexing will be skipped if exists
+        Returns
+        -------
+        None
+        """
         self.build_raw(if_exists=if_exists)
         self.build_vocabulary()
         self.indexing_db(if_exists=if_exists)
@@ -265,6 +327,16 @@ class SqlDB:
         print('Database Setup complete!')
 
     def build(self, if_exists='skip'):
+        """
+        Synonym for `setup_database` method
+        Parameters
+        ----------
+        if_exists : 'skip' or 'replace'
+            if 'skip' raw and indexing will be skipped if exists
+        Returns
+        -------
+        None
+        """
         self.build_raw(if_exists=if_exists)
         self.build_vocabulary()
         self.indexing_db(if_exists=if_exists)
@@ -272,6 +344,16 @@ class SqlDB:
         print('Database Setup complete!')
         
     def build_raw(self, if_exists='skip'):
+        """
+        Import data from the raw file and build the raw table using the function `flap.database.db_import.db_import`
+        Parameters
+        ----------
+        if_exists : 'skip' or 'replace'
+            if 'skip' raw import will be skipped if exists
+        Returns
+        -------
+        None
+        """
         db_status = self.db_status
 
         print(db_status)
@@ -292,6 +374,16 @@ class SqlDB:
             db_import(self)
 
     def indexing_db(self, if_exists='skip'):
+        """
+        Index the raw table using the function `flap.database.db_index.db_index`
+        Parameters
+        ----------
+        if_exists : 'skip' or 'replace'
+            if 'skip' indexing will be skipped if `indexed` table exists
+        Returns
+        -------
+        None
+        """
         db_status = self.db_status
 
         if if_exists == 'skip':
@@ -309,7 +401,12 @@ class SqlDB:
             self.delete_temp()
 
     def build_vocabulary(self):
-
+        """
+        Build vocabularies for address parsing. See `flap.parser.rule_parser_fast.RuleParserFast`
+        Returns
+        -------
+        None
+        """
         print('Start building vocabularies')
         if not os.path.exists(self.sub_paths['vocabulary']):
             os.mkdir(self.sub_paths['vocabulary'])
@@ -324,7 +421,12 @@ class SqlDB:
         print('Finished building vocabularies')
 
     def build_csv(self):
-
+        """
+        Export `indexed` and `expanded` table to csv files for the use in `flap.database.sql_in_memory.SqlDBInMemory`
+        Returns
+        -------
+        None
+        """
         for table_name in ['indexed', 'expanded']:
 
             print(f'Start saving {table_name} to csv for in-memory DB')
@@ -344,19 +446,47 @@ class SqlDB:
                 header = False
 
     def get_conn(self):
+        """
+        Open a connection to the SQL database
+        Returns
+        -------
+        sqlite3.conn
+        """
         return sqlite3.connect(self.sub_paths['sql_db'], timeout=10)
 
     def get_conn_temp(self):
+        """
+        Open a connection to the temporary SQL database
+        Returns
+        -------
+        sqlite3.conn
+        """
         return sqlite3.connect(self.sub_paths['sql_db_temp'], timeout=10)
 
     def delete_temp(self):
+        """
+        Delete the temporary SQL database
+        Returns
+        -------
+        None
+        """
         try:
             os.remove(self.sub_paths['sql_db_temp'])
         except FileNotFoundError:
             pass
 
     def sql_query(self, query):
-
+        """
+        Query the SQL database
+        Parameters
+        ----------
+        query : str
+            The query string containing SQL script
+        Returns
+        -------
+        list
+            Query results
+        """
         conn = self.get_conn()
         cur = conn.cursor()
         cur.execute(query)
@@ -367,7 +497,19 @@ class SqlDB:
         return res
 
     def sql_query_by_column_values(self, table_name, column, value_list):
+        """
+        Query the table in the format `f"select * from {table_name} where {column} IN ({in_clause})"`
+        Parameters
+        ----------
+        table_name : str
+        column : str
+        value_list : str
 
+        Returns
+        -------
+        list
+            Query results
+        """
         in_clause = ', '.join(value_list)
         res = self.sql_query(f"""select * from {table_name} where {column} IN ({in_clause})""")
         return res

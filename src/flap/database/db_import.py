@@ -61,7 +61,22 @@ def db_import(sql_db):
 
     if '.csv' in raw_file:
 
-        raw = pd.read_csv(raw_file, chunksize=int(1e5), dtype='object', index_col=0)
+        headers = pd.read_csv(raw_file, dtype='object', nrows=1, header=None)
+
+        if headers.iloc[0, 0] == '28':
+            names = list(sql_db.get_db_config().keys())[:len(headers.columns)]
+
+            print('Please check the fields: \n')
+            sample_fields = {k: v for k, v in zip(names, headers.iloc[0, :].tolist())}
+            print(sample_fields)
+
+            raw = pd.read_csv(raw_file, names=names,
+                              chunksize=int(1e5), dtype='object')
+            
+        else:
+            headers.fillna('', inplace=True)
+            index_col = 0 if headers.iloc[0, 0] == '' else None
+            raw = pd.read_csv(raw_file, chunksize=int(1e5), dtype='object', index_col=index_col)
 
         for df_chunk in tqdm(raw):
             df_chunk.fillna('', inplace=True)
