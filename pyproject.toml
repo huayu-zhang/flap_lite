@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "flap-lite"
-version = "0.6.25"
+version = "0.6.26"
 authors = [
   { name="Huayu Zhang", email="huayu.zhang@ed.ac.uk"},
 ]
