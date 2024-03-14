@@ -321,8 +321,8 @@ class SqlDB:
         None
         """
         self.build_raw(if_exists=if_exists)
-        self.build_vocabulary()
         self.indexing_db(if_exists=if_exists)
+        self.build_vocabulary()
         self.build_csv()
         print('Database Setup complete!')
 
@@ -338,8 +338,8 @@ class SqlDB:
         None
         """
         self.build_raw(if_exists=if_exists)
-        self.build_vocabulary()
         self.indexing_db(if_exists=if_exists)
+        self.build_vocabulary()
         self.build_csv()
         print('Database Setup complete!')
         
