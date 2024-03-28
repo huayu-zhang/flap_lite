@@ -140,6 +140,20 @@ def join_uprn_fields(d_uprn):
     #     else:
     #         d_uprn[key] = str(d_uprn[key])
 
+    return ','.join([d_uprn[name] for name in
+                     ['ORGANISATION_NAME', 'DEPARTMENT_NAME', 'SUB_BUILDING_NAME', 'BUILDING_NAME',
+                      'BUILDING_NUMBER', 'DEPENDENT_THOROUGHFARE', 'THOROUGHFARE',
+                      'DOUBLE_DEPENDENT_LOCALITY', 'DEPENDENT_LOCALITY', 'POST_TOWN', 'POSTCODE'
+                      ]])
+
+
+def join_uprn_fields_vis(d_uprn):
+    # for key in d_uprn:
+    #     if pd.isna(d_uprn[key]):
+    #         d_uprn[key] = ''
+    #     else:
+    #         d_uprn[key] = str(d_uprn[key])
+
     return '\n'.join([
         ' | '.join([d_uprn['ORGANISATION_NAME'], d_uprn['DEPARTMENT_NAME'],
                     d_uprn['SUB_BUILDING_NAME'], d_uprn['BUILDING_NAME']]),

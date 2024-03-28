@@ -288,7 +288,7 @@ def match(input_csv, db_path, output_file_path=None, raw_output_path=None,
     # Summarising results
 
     if raw_output_path is not None:
-        results = _load_all_csv_from_path(raw_output_path, dtype='object')
+        results = _load_all_csv_from_path(raw_output_path, dtype='object', lineterminator='\n')
     else:
         results = pd.concat(res_collection)
 

@@ -58,15 +58,22 @@ def score_and_match(input_csv, db_path, final_output=None,
         Final results
     """
 
-    if not os.path.exists(score_output):
+    if score_output is not None:
 
+        if os.path.exists(score_output):
+            scored = pd.read_csv(score_output, index_col=0, dtype='object')
+
+        else:
+            scored = score(input_csv, db_path, output_file_path=score_output, raw_output_path=score_output_raw,
+                           batch_size=score_batch_size, max_workers=max_workers, in_memory_db=in_memory_db,
+                           classifier_model_path=classifier_model_path,
+                           input_address_col=input_address_col, uprn_col=uprn_col)
+
+    else:
         scored = score(input_csv, db_path, output_file_path=score_output, raw_output_path=score_output_raw,
                        batch_size=score_batch_size, max_workers=max_workers, in_memory_db=in_memory_db,
                        classifier_model_path=classifier_model_path,
                        input_address_col=input_address_col, uprn_col=uprn_col)
-
-    else:
-        scored = pd.read_csv(score_output, index_col=0, dtype='object')
 
     scored['flap_eval_score'] = scored['flap_eval_score'].astype(float)
 

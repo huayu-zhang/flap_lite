@@ -360,18 +360,16 @@ class SqlMatcher:
 
         results = []
 
-        for table_name in ['indexed', 'expanded']:
-            # Start of main loop on Tables
+        for query in self.queries:
+            # Start of Loop Over queries
 
             row_matched = []
 
-            for query in self.queries:
-
-                # Start of Loop Over queries
+            for table_name in ['indexed', 'expanded']:
+                # Start of main loop on Tables
 
                 try:
                     res = self._query(query, table_name, parsed)
-
                 except KeyError:
                     parsed = self.parser.parse(address, method='all')
                     try:
@@ -385,7 +383,6 @@ class SqlMatcher:
 
                 for i, row in res.iterrows():
                     row_d = row.to_dict()
-
                     if row_d not in row_matched:
                         results.append(self._match_one_record(parsed, row))
                         row_matched.append(row_d)
